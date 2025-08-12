@@ -1,0 +1,384 @@
+:root {
+  --bg: #0f172a;
+  --panel: #111827;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --accent: #22d3ee;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  overflow: hidden; /* prevent page-level scrollbars; we manage scroll in panes */
+}
+
+/* Remove default focus outlines for app controls and editor */
+input:focus, textarea:focus, select:focus, button:focus { outline: none !important; box-shadow: none !important; }
+.a4-canvas:focus { outline: none !important; box-shadow: none !important; }
+.ProseMirror:focus { outline: none !important; box-shadow: none !important; }
+
+.app-shell { display: grid; height: 100vh; grid-template-rows: 44px 1fr; }
+.app-shell.with-sidebar { grid-template-columns: 220px 1fr; grid-template-areas: "tabs tabs" "sidebar content"; }
+.app-shell.no-sidebar { grid-template-columns: 1fr; grid-template-areas: "tabs" "content"; }
+
+/* topbar removed */
+
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid #1f2937;
+  padding: 8px;
+  grid-area: sidebar;
+}
+
+.sidebar button {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  margin: 6px 0;
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  color: var(--text);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* avoid app-level scrollbars from child overflows */
+  min-height: 0; /* allow children to shrink */
+  grid-area: content;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  border-bottom: 1px solid #1f2937;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+  width: 100%;
+  flex: 0 0 auto;
+  height: 44px; /* 32px tab + 12px vertical padding */
+  grid-area: tabs;
+}
+
+.tabs::-webkit-scrollbar {
+  height: 8px;
+}
+.tabs::-webkit-scrollbar-track {
+  background: #0b1220;
+  border-radius: 8px;
+}
+.tabs::-webkit-scrollbar-thumb {
+  background: #384152;
+  border-radius: 8px;
+}
+.tabs::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}
+
+/* Main document scroll area */
+.view {
+  flex: 1;
+  overflow: auto;
+  padding: 0; /* remove inner padding on document view */
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: #384152 #0b1220; /* Firefox: thumb track */
+  min-height: 0; /* allow content to scroll instead of pushing layout */
+}
+
+/* Sticky tool tabs and panel */
+.sticky-tools {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.tool-tabs {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 0 12px 0 18px; /* move a bit to the right */
+  background: transparent;
+  position: relative; /* stacking context anchor */
+  z-index: 6; /* above tools-panel */
+  margin-bottom: -1px; /* overlap tools-panel top border by 1px */
+}
+
+/* add small breathing room when panel is hidden */
+.sticky-tools.no-active .tool-tabs { padding-top: 6px; }
+
+
+.tool-tab {
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 0 0 8px 8px; /* square top corners for all tabs */
+  cursor: pointer;
+  opacity: 0.8;
+  position: relative; /* for overflow clipping on active mask/borders */
+}
+
+.tool-tab.active { opacity: 1; border-top: none; }
+
+.tools-panel {
+  background: transparent;
+  border: none;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  padding: 0;
+}
+
+.tool-tabs .tool-tab.active {
+  background: #0b1220;
+  position: relative; /* anchor for masking */
+  border-top: 1px solid #0b1220; /* visually removes seam at contact */
+}
+
+/* Mask the toolbar's top border exactly under the active tab */
+/* Removed ::after mask to avoid bottom-corner artifact; z-index layering + border repaint handles seam */
+
+.tool-tabs .tool-tab:not(.active) {
+  background: #0b1220;
+  opacity: 0.7;
+}
+
+.tools-panel .toolbar {
+  justify-content: center;
+  align-items: center;
+  padding: 10px; /* symmetric vertical space */
+  background: #0b1220;
+  border-left: 1px solid #1f2937;
+  border-right: 1px solid #1f2937;
+  border-top: none; /* fuse with active tool-tab from top */
+  border-bottom: 1px solid #1f2937; /* restore bottom border */
+  border-radius: 0 0 8px 8px;
+  min-height: 64px; /* constant height */
+  position: relative;
+  z-index: 5; /* below tool-tabs */
+  /* subtle inner shadow to de-emphasize the seam; avoids 1px artifacts */
+  box-shadow: inset 0 1px 0 0 #0b1220;
+}
+
+/* keep bottom border even when a tab is active */
+/* .sticky-tools.has-active .tools-panel .toolbar { border-bottom: none; } */
+
+/* When any tool is active, make tool-tabs share the same horizontal space and collapse the seam */
+.sticky-tools.has-active .tool-tabs {
+  margin-top: -1px; /* cover toolbar border by 1px */
+}
+
+/* When no active tool, all tabs are pill-shaped (fully rounded) and panel is hidden */
+.sticky-tools.no-active .tool-tabs .tool-tab { border-radius: 8px; }
+.view::-webkit-scrollbar {
+  width: 10px;
+}
+.view::-webkit-scrollbar-track {
+  background: #0b1220;
+}
+.view::-webkit-scrollbar-thumb {
+  background: #384152;
+  border-radius: 8px;
+}
+.view::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  padding: 6px 10px;
+  border-radius: 8px 8px 0 0;
+  flex: 0 1 auto;
+  min-width: 120px;
+  max-width: 240px;
+  height: 32px; /* keep consistent tab height */
+  box-sizing: border-box;
+  user-select: none;
+  cursor: pointer;
+}
+
+.tab .title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab .close {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid #1f2937;
+  background: #0b1220;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+.tab .close:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tab.draggable { cursor: pointer; }
+.tab.draggable:active { cursor: pointer; }
+.tab.dragging { opacity: 0.6; }
+
+.tab.active {
+  outline: 1px solid var(--accent);
+  border-bottom: none; /* sticky fuse into content */
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* Mask the tabs container bottom border exactly under the active tab */
+/* removed ::after mask; rely on z-index + border repaint instead */
+
+/* Remove default focus ring from controls inside tabs */
+.tab :focus { outline: none; box-shadow: none; }
+.tab .close:focus { outline: none; box-shadow: none; }
+
+/* Visual indicator for drop position */
+.tab.drop-before { box-shadow: -2px 0 0 0 var(--accent); }
+.tab.drop-after { box-shadow: 2px 0 0 0 var(--accent); }
+
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.toolbar button, .toolbar select, .toolbar input[type="color"] {
+  background: #0b1220;
+  color: var(--text);
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.text-toolbar .tool {
+  background: #0b1220;
+  color: var(--text);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 8px 12px; /* slightly larger clickable area */
+}
+.text-toolbar .tool:hover { border-color: var(--accent); }
+.text-toolbar .tool.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.2);
+}
+
+/* Make icons bigger */
+.text-toolbar .tool svg { width: 20px; height: 20px; }
+
+/* Compact font/size selects */
+.text-toolbar .font-select, .text-toolbar .size-select {
+  padding: 6px 8px;
+}
+
+.text-toolbar .align-select, .text-toolbar .heading-select {
+  padding: 6px 8px;
+}
+
+/* Icon dropdown menu styling */
+.icon-dropdown-menu {
+  position: absolute;
+  margin-top: 4px;
+  padding: 6px;
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  display: none;
+  gap: 6px;
+}
+.icon-dropdown-menu.open { display: grid; }
+.text-toolbar .align-select, .text-toolbar .heading-select { position: relative; }
+.text-toolbar .align-select .icon-dropdown-menu, .text-toolbar .heading-select .icon-dropdown-menu { left: 0; top: 100%; z-index: 20; }
+
+
+/* Color swatches presentation */
+.text-toolbar .color-swatch {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 8px;
+}
+
+/* Editor content theming */
+.ProseMirror table { border-collapse: collapse; width: 100%; }
+.ProseMirror th, .ProseMirror td { border: 1px solid #cbd5e1; padding: 6px 8px; }
+.ProseMirror th { background: #0b1220; color: var(--text); }
+
+.ProseMirror pre { background: #0b1220; color: var(--text); padding: 10px 12px; border-radius: 8px; border: 1px solid #1f2937; overflow: auto; }
+.ProseMirror code { background: transparent; }
+
+.color-sample { width: 22px; height: 22px; border-radius: 6px; border: 1px solid #334155; display: inline-block; vertical-align: middle; margin-right: 6px; }
+.dropdown { position: relative; }
+.dropdown-menu { position: absolute; top: 100%; left: 0; background: #0b1220; border: 1px solid #1f2937; border-radius: 8px; padding: 6px; display: grid; gap: 6px; z-index: 10; }
+.dropdown-menu button { white-space: nowrap; }
+
+.a4-canvas {
+  margin: 0 auto;
+  width: 794px; /* A4 at 96dpi ~ 8.27in * 96 = 794px */
+  min-height: 1123px; /* 11.69in * 96 = 1123px */
+  background: white;
+  color: black;
+  padding: 32px;
+  border-radius: 8px;
+}
+
+.section-title {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 12px;
+}
+
+.doc-form {
+  max-width: 800px;
+}
+
+.doc-form input, .doc-form textarea {
+  width: 100%;
+  margin: 6px 0 14px 0;
+  padding: 8px 10px;
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  color: var(--text);
+  border-radius: 6px;
+}
+
+@media print {
+  body { background: white; }
+  .app-shell { display: block; }
+  .sidebar, .topbar, .tabs, .toolbar { display: none !important; }
+  .a4-canvas { width: auto; min-height: auto; box-shadow: none; }
+}
+
+

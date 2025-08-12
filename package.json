@@ -1,0 +1,102 @@
+{
+  "name": "researcher_react_electron",
+  "productName": "Researcher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scientific text editor built with React + Electron",
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"vite\" \"node scripts/start-electron-dev.mjs\"",
+    "start": "electron .",
+    "build:renderer": "vite build",
+    "build": "npm run build:renderer && electron-builder",
+    "clean": "rimraf dist",
+    "lint": "echo No linter configured"
+  },
+  "build": {
+    "appId": "com.example.researcher",
+    "productName": "Researcher",
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "asar": true,
+    "win": {
+      "target": ["nsis"],
+      "fileAssociations": [
+        {
+          "ext": "rsrch",
+          "name": "Researcher Document",
+          "description": "Researcher document",
+          "role": "Editor"
+        }
+      ]
+    },
+    "mac": {
+      "target": ["dmg"],
+      "fileAssociations": [
+        {
+          "ext": "rsrch",
+          "name": "Researcher Document",
+          "role": "Editor"
+        }
+      ]
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Office",
+      "fileAssociations": [
+        {
+          "ext": "rsrch",
+          "name": "Researcher Document",
+          "mimeType": "application/x-researcher"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "classnames": "^2.5.1",
+    "katex": "^0.16.10",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-icons": "^5.2.1",
+    "react-katex": "^3.1.0",
+    "recharts": "^2.12.7",
+    "@tiptap/react": "^2.3.2",
+    "@tiptap/starter-kit": "^2.3.2",
+    "@tiptap/extension-text-align": "^2.3.2",
+    "@tiptap/extension-color": "^2.3.2",
+    "@tiptap/extension-text-style": "^2.3.2",
+    "@tiptap/extension-highlight": "^2.3.2",
+    "@tiptap/extension-underline": "^2.3.2",
+    "@tiptap/extension-font-family": "^2.3.2",
+    "@tiptap/extension-code-block": "^2.3.2",
+    "@tiptap/extension-image": "^2.3.2",
+    "@tiptap/extension-mathematics": "^2.3.2",
+    "@tiptap/extension-table": "^2.3.2",
+    "@tiptap/extension-table-cell": "^2.3.2",
+    "@tiptap/extension-table-row": "^2.3.2",
+    "@tiptap/extension-table-header": "^2.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^9.0.1",
+    "electron": "^30.0.8",
+    "electron-builder": "^24.13.3",
+    "cross-env": "^7.0.3",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.1",
+    "wait-on": "^7.2.0"
+  }
+}
+
+
