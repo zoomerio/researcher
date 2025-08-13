@@ -33,7 +33,7 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
-          cache-dependency-path: researcher_react_electron/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -43,7 +43,7 @@ jobs:
 
       - name: Package and publish
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npx electron-builder --publish always
 
