@@ -1,21 +1,27 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import TextAlign from '@tiptap/extension-text-align';
-import TextStyle from '@tiptap/extension-text-style';
+import { TextStyle } from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import Underline from '@tiptap/extension-underline';
 import Highlight from '@tiptap/extension-highlight';
 import FontFamily from '@tiptap/extension-font-family';
 import CodeBlock from '@tiptap/extension-code-block';
+import Subscript from '@tiptap/extension-subscript';
+import Superscript from '@tiptap/extension-superscript';
 import Image from '@tiptap/extension-image';
-import Mathematics from '@tiptap/extension-mathematics';
-import Table from '@tiptap/extension-table';
+import Mathematics, { migrateMathStrings } from '@tiptap/extension-mathematics';
+import DragHandleReact from '@tiptap/extension-drag-handle-react';
+// Table with extra attributes
+import TableWithExtras from '../tiptap/TableExtras';
 import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import FontSize from '../tiptap/FontSize';
 import BackgroundColor from '../tiptap/BackgroundColor';
+import { MathEditingNode } from '../tiptap/MathEditingNode';
+import { GraphNode } from '../tiptap/GraphNode';
 import {
   RiBold,
   RiItalic,
@@ -25,6 +31,10 @@ import {
   RiParagraph,
   RiH1,
   RiH2,
+  RiH3,
+  RiH4,
+  RiH5,
+  RiH6,
   RiAlignLeft,
   RiAlignCenter,
   RiAlignRight,
@@ -32,9 +42,156 @@ import {
   RiListUnordered,
   RiListOrdered,
   RiCodeBoxLine,
+  RiCodeLine,
   RiImageLine,
   RiMenuLine,
+  RiSubscript,
+  RiSuperscript,
+  RiArrowDownSLine,
+  RiCheckLine,
+  RiFontColor,
+  RiPaintFill,
+  RiTableLine,
+  RiAddLine,
+  RiSubtractLine,
+  RiArrowUpLine,
+  RiArrowDownLine,
+  RiArrowLeftLine,
+  RiArrowRightLine,
+  RiEyeLine,
+  RiEyeOffLine,
+  RiDeleteBinLine,
+  RiDeleteBack2Line,
+  RiDeleteBin2Line,
+  RiEditLine,
 } from 'react-icons/ri';
+
+type DropdownItem = { key: string; label: string; icon?: ReactNode };
+
+const Dropdown: React.FC<{
+  label: string;
+  icon?: ReactNode;
+  items: DropdownItem[];
+  selectedKey?: string;
+  onSelect: (key: string) => void;
+  active?: boolean;
+  fixedWidthPx?: number;
+  mathEditingState?: { isEditing: boolean; originalPosition: number; mathType: 'inline' | 'block'; originalLatex: string; } | null;
+}> = ({ label, icon, items, selectedKey, onSelect, active = false, fixedWidthPx, mathEditingState }) => {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+  return (
+    <div className="dropdown" ref={containerRef}>
+      <button
+        className={`tool ${active ? 'active' : ''}`}
+        onClick={() => setOpen((v) => !v)}
+        onMouseDown={(e) => mathEditingState?.isEditing && e.preventDefault()}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={fixedWidthPx ? { width: fixedWidthPx, justifyContent: 'space-between' } as React.CSSProperties : { display: 'flex', alignItems: 'center', gap: '6px' }}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, flex: fixedWidthPx ? '1 1 auto' : undefined }}>
+          {icon}
+          {label ? <span className="dropdown-label" style={{ minWidth: 0 }}>{label}</span> : null}
+        </span>
+        <RiArrowDownSLine />
+      </button>
+      {open && (
+        <div className="dropdown-menu" role="menu">
+          {items.map((it) => (
+            <button
+              key={it.key}
+              className="tool"
+              role="menuitemradio"
+              aria-checked={selectedKey === it.key}
+              onClick={() => { onSelect(it.key); setOpen(false); }}
+              onMouseDown={(e) => mathEditingState?.isEditing && e.preventDefault()}
+              title={it.label}
+              style={{ justifyContent: 'flex-start', gap: 8 }}
+            >
+              {it.icon}
+              <span>{it.label}</span>
+              {selectedKey === it.key && <RiCheckLine style={{ marginLeft: 'auto' }} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Grid-based dropdown for formula panel - displays items in a table layout
+const GridDropdown: React.FC<{
+  label: string;
+  icon?: ReactNode;
+  items: DropdownItem[];
+  onSelect: (key: string) => void;
+  active?: boolean;
+  columns?: number;
+  mathEditingState?: { isEditing: boolean; originalPosition: number; mathType: 'inline' | 'block'; originalLatex: string; } | null;
+}> = ({ label, icon, items, onSelect, active = false, columns = 4, mathEditingState }) => {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  return (
+    <div className="dropdown" ref={containerRef}>
+      <button
+        className={`tool grid-dropdown-button ${active ? 'active' : ''}`}
+        onClick={() => setOpen((v) => !v)}
+        onMouseDown={(e) => mathEditingState?.isEditing && e.preventDefault()}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <span className="grid-dropdown-content">
+          {icon}
+          {label ? <span className="dropdown-label">{label}</span> : null}
+        </span>
+        <RiArrowDownSLine />
+      </button>
+      {open && (
+        <div 
+          className="dropdown-menu grid-dropdown-menu" 
+          role="menu"
+          style={{
+            gridTemplateColumns: `repeat(${columns}, 1fr)`
+          }}
+        >
+          {items.map((it) => (
+            <button
+              key={it.key}
+              className="tool grid-dropdown-item"
+              role="menuitemradio"
+              onClick={() => { onSelect(it.key); setOpen(false); }}
+              onMouseDown={(e) => mathEditingState?.isEditing && e.preventDefault()}
+              title={it.label}
+
+            >
+              {it.icon}
+              <span className="grid-dropdown-key">{it.key}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 type Tab = {
   id: string;
@@ -104,12 +261,24 @@ export const App: React.FC = () => {
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [dropBefore, setDropBefore] = useState<boolean>(false);
+  const [selectedGraph, setSelectedGraph] = useState<any>(null);
+  
+  // Math editing state
+  const [mathEditingState, setMathEditingState] = useState<{
+    isEditing: boolean;
+    originalPosition: number;
+    mathType: 'inline' | 'block';
+    originalLatex: string;
+  } | null>(null);
   // detach is triggered by double-click now; DnD used for reorder and reattach only
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId), [tabs, activeTabId]);
 
   // Editor must be declared before any useEffect/useRef that references it
   const editor = useEditor({
+    onCreate: ({ editor: currentEditor }) => {
+      migrateMathStrings(currentEditor);
+    },
     extensions: [
       StarterKit,
       TextStyle,
@@ -120,10 +289,415 @@ export const App: React.FC = () => {
       Highlight,
       FontFamily,
       CodeBlock,
+      Subscript,
+      Superscript,
       Image,
-      Mathematics,
+      MathEditingNode,
+      GraphNode,
+      Mathematics.configure({
+        katexOptions: {
+          throwOnError: false,
+          errorColor: '#cc0000',
+          strict: false,
+        },
+        blockOptions: {
+          onClick: (node, pos) => {
+            const handleBlockClick = () => {
+              const latex = node.attrs.latex;
+              
+              console.log(`=== STARTING BLOCK EDIT "${latex}" at pos ${pos} ===`);
+              
+              // Debug: Check what node is at this position
+              const nodeAtPos = editor.state.doc.nodeAt(pos);
+              console.log(`Node at position ${pos}:`, nodeAtPos?.type.name, nodeAtPos?.attrs);
+              
+              // VALIDATION: Check if clicked node matches the position and type
+              if (nodeAtPos) {
+                if (nodeAtPos.type.name === 'inlineMath') {
+                  console.error(`TYPE MISMATCH: Trying to edit block but found inlineMath at position ${pos}`);
+                  return; // Abort - don't try to edit wrong type
+                }
+                if (nodeAtPos.type.name === 'blockMath' && nodeAtPos.attrs.latex !== latex) {
+                  console.warn(`CONTENT MISMATCH: Clicked "${latex}" but found "${nodeAtPos.attrs.latex}" at position ${pos}`);
+                }
+              }
+              
+              // ROBUST FIX: Find the EXACT position of the clicked node object
+              let actualMathPos: number = pos; // Initialize with clicked position as fallback
+              let foundMathNode = false;
+              
+              // Search the entire document to find this EXACT node object
+              editor.state.doc.descendants((docNode, nodePos, parent) => {
+                // Compare the actual node objects and their content
+                if (docNode.type.name === 'blockMath' && 
+                    docNode.attrs.latex === latex &&
+                    docNode === node) { // This is the exact same node object
+                  actualMathPos = nodePos;
+                  foundMathNode = true;
+                  console.log(`Found EXACT node object at position ${nodePos} (clicked pos was ${pos})`);
+                  return false; // Stop searching
+                }
+              });
+              
+              // Fallback: if we can't find the exact node, search by content near the click
+              if (!foundMathNode) {
+                console.warn(`Could not find exact node object, falling back to content search`);
+                let bestMatch = null;
+                let bestDistance = Infinity;
+                
+                editor.state.doc.descendants((docNode, nodePos, parent) => {
+                  if (docNode.type.name === 'blockMath' && docNode.attrs.latex === latex) {
+                    const distance = Math.abs(nodePos - pos);
+                    if (distance < bestDistance && distance <= 10) { // Larger range for block
+                      bestMatch = nodePos;
+                      bestDistance = distance;
+                      console.log(`Found candidate block math node at position ${nodePos} (distance: ${distance})`);
+                    }
+                  }
+                });
+                
+                if (bestMatch !== null) {
+                  actualMathPos = bestMatch;
+                  foundMathNode = true;
+                  console.log(`Using closest match at position ${bestMatch}`);
+                }
+              }
+              
+              if (!foundMathNode) {
+                console.error(`Could not find block math node with latex "${latex}" near position ${pos}`);
+                return;
+              }
+              
+              setMathEditingState({
+                isEditing: true,
+                originalPosition: actualMathPos,
+                mathType: 'block',
+                originalLatex: latex
+              });
+              
+              // Create a unique ID for this editing session
+              const editingId = `math-editing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              
+              // Replace the math node with our custom editing node
+              editor.chain()
+                .setNodeSelection(actualMathPos)
+                .deleteSelection()
+                .insertContent({
+                  type: 'mathEditingNode',
+                  attrs: {
+                    mathType: 'block',
+                    originalLatex: latex,
+                    editingId: editingId
+                  }
+                })
+                .run();
+              
+              // Remove focus from the editor to prevent cursor conflicts
+              setTimeout(() => {
+                if (editor.view.dom) {
+                  editor.view.dom.blur();
+                }
+              }, 20);
+            };
+            
+            // Check if there's already an editing node and finish it first
+            const existingEditingNodes = editor.view.dom.querySelectorAll('.math-editing-node');
+            if (existingEditingNodes.length > 0) {
+              console.log(`=== SWITCHING TO BLOCK FORMULA "${node.attrs.latex}" at pos ${pos} ===`);
+              
+              // Store current LaTeX values to prevent interference
+              const currentEditingValues = Array.from(existingEditingNodes).map((nodeElement, index) => {
+                const input = nodeElement.querySelector('input') as HTMLInputElement;
+                const editingId = nodeElement.getAttribute('data-math-editing') || '';
+                const currentValue = input?.value || '';
+                console.log(`Existing node ${index + 1} [${editingId}]: "${currentValue}"`);
+                return {
+                  input: input,
+                  currentValue: currentValue,
+                  editingId: editingId
+                };
+              });
+              
+              // Track if editing finished event fired to prevent double execution
+              let eventFired = false;
+              
+              // Listen for completion before starting new edit
+              const handleEditingFinished = (event: any) => {
+                if (eventFired) return;
+                eventFired = true;
+                
+                console.log(`Previous editing finished [${event.detail.editingId}], starting new block edit...`);
+                document.removeEventListener('mathEditingFinished', handleEditingFinished);
+                setTimeout(() => {
+                  // CRITICAL: Find the actual current position of the target formula
+                  // since positions may have shifted during editing
+                  let foundPos = pos;
+                  const targetLatex = node.attrs.latex;
+                  let bestMatch = null;
+                  let bestDistance = Infinity;
+                  
+                  // Search for the target formula, preferring the one closest to original position
+                  editor.state.doc.descendants((node, currentPos) => {
+                    if (node.type.name === 'blockMath' && node.attrs.latex === targetLatex) {
+                      const distance = Math.abs(currentPos - pos);
+                      if (distance < bestDistance) {
+                        bestMatch = currentPos;
+                        bestDistance = distance;
+                        console.log(`Found target formula "${targetLatex}" at position ${currentPos} (distance: ${distance})`);
+                      }
+                    }
+                  });
+                  
+                  if (bestMatch !== null) {
+                    foundPos = bestMatch;
+                    console.log(`Using closest match at position: ${foundPos}`);
+                  }
+                  
+                  const currentCursor = editor.state.selection.from;
+                  console.log(`Current cursor: ${currentCursor}, target: ${foundPos}`);
+                  if (currentCursor !== foundPos) {
+                    console.log(`Setting cursor to target position ${foundPos} before starting new edit`);
+                    editor.chain().setTextSelection(foundPos).run();
+                  }
+                  handleBlockClick();
+                }, 50);
+              };
+              
+              document.addEventListener('mathEditingFinished', handleEditingFinished);
+              
+              // Finish existing editing nodes
+              currentEditingValues.forEach(({ input, currentValue, editingId }) => {
+                if (input) {
+                  console.log(`Triggering ESC on [${editingId}] with value: "${currentValue}"`);
+                  input.value = currentValue;
+                  const escEvent = new KeyboardEvent('keydown', {
+                    key: 'Escape',
+                    code: 'Escape',
+                    bubbles: true,
+                    cancelable: true
+                  });
+                  input.dispatchEvent(escEvent);
+                }
+              });
+              
+              // Fallback timeout
+              setTimeout(() => {
+                if (eventFired) return; // Don't execute fallback if event already fired
+                eventFired = true;
+                
+                document.removeEventListener('mathEditingFinished', handleEditingFinished);
+                console.log('Fallback: Starting new block click after timeout...');
+                // CRITICAL: Reset cursor to target position in fallback too
+                console.log(`Fallback: Setting cursor to target position ${pos}`);
+                editor.chain().setTextSelection(pos).run();
+                handleBlockClick();
+              }, 300);
+              
+              return;
+            }
+            
+            handleBlockClick();
+          },
+        },
+        inlineOptions: {
+          onClick: (node, pos) => {
+            const handleInlineClick = () => {
+              const latex = node.attrs.latex;
+              
+              console.log(`=== STARTING INLINE EDIT "${latex}" at pos ${pos} ===`);
+              
+              // Debug: Check what node is at this position
+              const nodeAtPos = editor.state.doc.nodeAt(pos);
+              console.log(`Node at position ${pos}:`, nodeAtPos?.type.name, nodeAtPos?.attrs);
+              
+              // VALIDATION: Check if clicked node matches the position and type
+              if (nodeAtPos) {
+                if (nodeAtPos.type.name === 'blockMath') {
+                  console.error(`TYPE MISMATCH: Trying to edit inline but found blockMath at position ${pos}`);
+                  return; // Abort - don't try to edit wrong type
+                }
+                if (nodeAtPos.type.name === 'inlineMath' && nodeAtPos.attrs.latex !== latex) {
+                  console.warn(`CONTENT MISMATCH: Clicked "${latex}" but found "${nodeAtPos.attrs.latex}" at position ${pos}`);
+                }
+              }
+              
+              // ROBUST FIX: Find the EXACT position of the clicked node object
+              let actualMathPos: number = pos; // Initialize with clicked position as fallback
+              let foundMathNode = false;
+              
+              // Search the entire document to find this EXACT node object
+              editor.state.doc.descendants((docNode, nodePos, parent) => {
+                // Compare the actual node objects and their content
+                if (docNode.type.name === 'inlineMath' && 
+                    docNode.attrs.latex === latex &&
+                    docNode === node) { // This is the exact same node object
+                  actualMathPos = nodePos;
+                  foundMathNode = true;
+                  console.log(`Found EXACT node object at position ${nodePos} (clicked pos was ${pos})`);
+                  return false; // Stop searching
+                }
+              });
+              
+              // Fallback: if we can't find the exact node, search by content near the click
+              if (!foundMathNode) {
+                console.warn(`Could not find exact node object, falling back to content search`);
+                let bestMatch = null;
+                let bestDistance = Infinity;
+                
+                editor.state.doc.descendants((docNode, nodePos, parent) => {
+                  if (docNode.type.name === 'inlineMath' && docNode.attrs.latex === latex) {
+                    const distance = Math.abs(nodePos - pos);
+                    if (distance < bestDistance && distance <= 5) {
+                      bestMatch = nodePos;
+                      bestDistance = distance;
+                      console.log(`Found candidate inline math node at position ${nodePos} (distance: ${distance})`);
+                    }
+                  }
+                });
+                
+                if (bestMatch !== null) {
+                  actualMathPos = bestMatch;
+                  foundMathNode = true;
+                  console.log(`Using closest match at position ${bestMatch}`);
+                }
+              }
+              
+              if (!foundMathNode) {
+                console.error(`Could not find inline math node with latex "${latex}" near position ${pos}`);
+                return;
+              }
+              
+              setMathEditingState({
+                isEditing: true,
+                originalPosition: actualMathPos,
+                mathType: 'inline',
+                originalLatex: latex
+              });
+              
+              // Create a unique ID for this editing session
+              const editingId = `math-editing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              
+              // Replace the math node with our custom editing node
+              editor.chain()
+                .setNodeSelection(actualMathPos)
+                .deleteSelection()
+                .insertContent({
+                  type: 'mathEditingNode',
+                  attrs: {
+                    mathType: 'inline',
+                    originalLatex: latex,
+                    editingId: editingId
+                  }
+                })
+                .run();
+              
+              // Remove focus from the editor to prevent cursor conflicts
+              setTimeout(() => {
+                if (editor.view.dom) {
+                  editor.view.dom.blur();
+                }
+              }, 20);
+            };
+            
+            // Check if there's already an editing node and finish it first
+            const existingEditingNodes = editor.view.dom.querySelectorAll('.math-editing-node');
+            if (existingEditingNodes.length > 0) {
+              // Store current LaTeX values to prevent interference
+              const currentEditingValues = Array.from(existingEditingNodes).map(nodeElement => {
+                const input = nodeElement.querySelector('input') as HTMLInputElement;
+                return {
+                  input: input,
+                  currentValue: input?.value || ''
+                };
+              });
+              
+              // Track if editing finished event fired to prevent double execution
+              let eventFired = false;
+              
+              // Listen for completion before starting new edit
+              const handleEditingFinished = () => {
+                if (eventFired) return;
+                eventFired = true;
+                
+                document.removeEventListener('mathEditingFinished', handleEditingFinished);
+                setTimeout(() => {
+                  // CRITICAL: Find the actual current position of the target formula
+                  // since positions may have shifted during editing
+                  let foundPos = pos;
+                  const targetLatex = node.attrs.latex;
+                  let bestMatch = null;
+                  let bestDistance = Infinity;
+                  
+                  // Search for the target formula, preferring the one closest to original position
+                  editor.state.doc.descendants((node, currentPos) => {
+                    if (node.type.name === 'inlineMath' && node.attrs.latex === targetLatex) {
+                      const distance = Math.abs(currentPos - pos);
+                      if (distance < bestDistance) {
+                        bestMatch = currentPos;
+                        bestDistance = distance;
+                        console.log(`Found target formula "${targetLatex}" at position ${currentPos} (distance: ${distance})`);
+                      }
+                    }
+                  });
+                  
+                  if (bestMatch !== null) {
+                    foundPos = bestMatch;
+                    console.log(`Using closest match at position: ${foundPos}`);
+                  }
+                  
+                  const currentCursor = editor.state.selection.from;
+                  console.log(`Current cursor: ${currentCursor}, target: ${foundPos}`);
+                  if (currentCursor !== foundPos) {
+                    console.log(`Setting cursor to target position ${foundPos} before starting inline edit`);
+                    editor.chain().setTextSelection(foundPos).run();
+                  }
+                  handleInlineClick();
+                }, 50);
+              };
+            
+              document.addEventListener('mathEditingFinished', handleEditingFinished);
+              
+              // Finish existing editing nodes
+              currentEditingValues.forEach(({ input, currentValue }) => {
+                if (input) {
+                  input.value = currentValue;
+                  const escEvent = new KeyboardEvent('keydown', {
+                    key: 'Escape',
+                    code: 'Escape',
+                    bubbles: true,
+                    cancelable: true
+                  });
+                  input.dispatchEvent(escEvent);
+                }
+              });
+              
+              // Fallback timeout
+              setTimeout(() => {
+                if (eventFired) return; // Don't execute fallback if event already fired
+                eventFired = true;
+                
+                document.removeEventListener('mathEditingFinished', handleEditingFinished);
+                // CRITICAL: Reset cursor to target position in fallback too
+                console.log(`Fallback: Setting cursor to target position ${pos} for inline`);
+                editor.chain().setTextSelection(pos).run();
+                handleInlineClick();
+              }, 300);
+              
+              return;
+            }
+            
+            handleInlineClick();
+          },
+        },
+      }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      Table.configure({ resizable: true }),
+      TableWithExtras.configure({
+        resizable: true,
+        lastColumnResizable: false, // Disable resizing the last column
+        handleWidth: 5,
+        cellMinWidth: 50,
+        allowTableNodeSelection: true,
+      }),
       TableRow,
       TableHeader,
       TableCell,
@@ -158,6 +732,112 @@ export const App: React.FC = () => {
     };
   }, [editor]);
 
+  // Debug Mathematics extension and handle math editing
+  useEffect(() => {
+    if (!editor) return;
+    
+
+    
+    // Handle keyboard events for Esc/Enter keys to exit math editing
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (mathEditingState?.isEditing && (event.key === 'Escape' || event.key === 'Enter')) {
+        // Check if we have a math editing node that should handle this
+        const editorElement = editor.view.dom;
+        const mathEditingNodes = editorElement.querySelectorAll('.math-editing-node');
+        
+        if (mathEditingNodes.length > 0) {
+          // Let the math editing node handle the key
+          return;
+        }
+        
+
+        event.preventDefault();
+        event.stopPropagation();
+        finishMathEditing();
+      }
+    };
+
+    // Add keyboard listener to the editor's DOM element
+    const editorElement = editor.view.dom;
+    editorElement.addEventListener('keydown', handleKeyDown);
+
+    // Listen for math editing finished events from the editing nodes
+    const handleMathEditingFinished = (event: any) => {
+      // Reset the math editing state when the editing node is replaced
+      setMathEditingState(null);
+    };
+
+    // Debounced observer to watch for math editing nodes being added/removed
+    let observerTimeout: NodeJS.Timeout | null = null;
+    const observerCallback = (mutations: MutationRecord[]) => {
+      // Debounce the observer to prevent excessive state updates
+      if (observerTimeout) {
+        clearTimeout(observerTimeout);
+      }
+      
+      observerTimeout = setTimeout(() => {
+        // Check if there are any math editing nodes in the document
+        const editingNodes = editorElement.querySelectorAll('.math-editing-node');
+        const hasEditingNodes = editingNodes.length > 0;
+
+        let editingNodeFound = null;
+        if (hasEditingNodes && editingNodes[0]) {
+          const nodeElement = editingNodes[0] as HTMLElement;
+          
+          // Extract editing info from data attributes
+          editingNodeFound = {
+            isEditing: true,
+            originalPosition: 0, // Position tracking can be added later if needed
+            mathType: nodeElement.getAttribute('data-math-type') as 'block' | 'inline' || 'inline',
+            originalLatex: nodeElement.getAttribute('data-original-latex') || ''
+          };
+
+
+        }
+
+        // Sync the editing state with the presence of editing nodes
+        if (hasEditingNodes && !mathEditingState?.isEditing) {
+          setMathEditingState(editingNodeFound);
+        } else if (!hasEditingNodes && mathEditingState?.isEditing) {
+          setMathEditingState(null);
+        }
+      }, 50); // 50ms debounce
+    };
+
+    // Set up MutationObserver to watch for DOM changes
+    const observer = new MutationObserver(observerCallback);
+    observer.observe(editorElement, {
+      childList: true,
+      subtree: true,
+      attributes: false
+    });
+
+    // Initial check for existing editing nodes
+    observerCallback([]);
+
+    document.addEventListener('mathEditingFinished', handleMathEditingFinished);
+
+    return () => {
+      editorElement.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mathEditingFinished', handleMathEditingFinished);
+      observer.disconnect();
+      if (observerTimeout) {
+        clearTimeout(observerTimeout);
+      }
+    };
+  }, [editor, mathEditingState]);
+
+
+
+  // Function to finish math editing and convert to proper math node
+  const finishMathEditing = () => {
+    if (!editor || !mathEditingState) return;
+    
+    // The math editing node handles finishing internally
+    // Just reset the editing state
+      setMathEditingState(null);
+  };
+
   // Refs to avoid duplicate listeners and stale closures
   const activeTabRef = useRef<Tab | undefined>(activeTab);
   const tabsRef = useRef<Tab[]>(tabs);
@@ -168,6 +848,8 @@ export const App: React.FC = () => {
   const viewRef = useRef<HTMLDivElement | null>(null);
   const tabsContainerRef = useRef<HTMLDivElement | null>(null);
   const externalDragPayloadRef = useRef<any>(null);
+  const textColorInputRef = useRef<HTMLInputElement | null>(null);
+  const bgColorInputRef = useRef<HTMLInputElement | null>(null);
   function setActiveTabSafely(nextId: string) {
     const currentId = activeTabRef.current?.id;
     const currentScroll = viewRef.current?.scrollTop || 0;
@@ -184,6 +866,34 @@ export const App: React.FC = () => {
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
   useEffect(() => { docMetaRef.current = docMeta; }, [docMeta]);
+
+  // Global graph selection management - works regardless of active tab
+  useEffect(() => {
+    const handleGraphSelected = (event: any) => {
+      setSelectedGraph(event.detail)
+    }
+
+    document.addEventListener('graphSelected', handleGraphSelected)
+    return () => document.removeEventListener('graphSelected', handleGraphSelected)
+  }, [])
+
+  // Global click handler to deselect graphs when clicking empty space - works from any tab
+  useEffect(() => {
+    const handleDocumentClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      // Check if click is on editor content but not on a graph
+      if (target.closest('.a4-canvas') && !target.closest('.graph-node')) {
+        setSelectedGraph(null)
+        // Remove selection styling from all graphs
+        document.querySelectorAll('.graph-node').forEach(el => {
+          el.classList.remove('selected')
+        })
+      }
+    }
+
+    document.addEventListener('click', handleDocumentClick)
+    return () => document.removeEventListener('click', handleDocumentClick)
+  }, [])
   useEffect(() => { editorRef.current = editor; }, [editor]);
   // Helpers to normalize CSS color strings to #rrggbb for <input type="color">
   function rgbToHex(rgb: string): string | null {
@@ -200,6 +910,12 @@ export const App: React.FC = () => {
     if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value)) return value;
     const hex = rgbToHex(value);
     return hex || fallback;
+  }
+
+  function normalizeFontFamilyName(value?: string): string {
+    if (!value) return 'system-ui';
+    const first = value.split(',')[0]?.trim() || value;
+    return first.replace(/^['"]+|['"]+$/g, '');
   }
 
 
@@ -608,110 +1324,338 @@ export const App: React.FC = () => {
               <div className={`sticky-tools ${activeTool ? 'has-active' : 'no-active'}`}>
                 {activeTool !== null && (
                 <div className="tools-panel">
+              {/* Global LaTeX editing notification - visible on all tabs */}
+              {mathEditingState?.isEditing && (
+                <div className="latex-editing-notification">
+                  🖊️ Редактирование LaTeX • ESC для выхода
+                </div>
+              )}
+
               {activeTool === 'text' && (
-                <div className="toolbar text-toolbar" style={{ flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>
-                  {/* Font family */}
-                  <select
-                    className="tool font-select"
-                    value={editor?.getAttributes('textStyle').fontFamily || 'system-ui'}
-                    onChange={(e) => editor?.chain().focus().setFontFamily((e.target.value || 'system-ui') as string).run()}
-                    title="Шрифт"
-                  >
-                    <option value="system-ui">Системный</option>
-                    <option value="Arial">Arial</option>
-                    <option value="Georgia">Georgia</option>
-                    <option value="Times New Roman">Times New Roman</option>
-                    <option value="Courier New">Courier New</option>
-                    <option value="Verdana">Verdana</option>
-                  </select>
+                <div className="toolbar text-toolbar">
+                  {/* Group: Text style */}
+                  <div className="tool-group">
+                    {/* Font family dropdown */}
+                    <Dropdown
+                      label={(() => {
+                        const fam = normalizeFontFamilyName(editor?.getAttributes('textStyle').fontFamily as string);
+                        const labelMap: Record<string, string> = {
+                          'system-ui': 'Системный',
+                          'Arial': 'Arial',
+                          'Georgia': 'Georgia',
+                          'Times New Roman': 'Times New Roman',
+                          'Courier New': 'Courier New',
+                          'Verdana': 'Verdana',
+                        };
+                        return labelMap[fam] || fam;
+                      })()}
+                      icon={null}
+                      items={[
+                        { key: 'system-ui', label: 'Системный' },
+                        { key: 'Arial', label: 'Arial' },
+                        { key: 'Georgia', label: 'Georgia' },
+                        { key: 'Times New Roman', label: 'Times New Roman' },
+                        { key: 'Courier New', label: 'Courier New' },
+                        { key: 'Verdana', label: 'Verdana' },
+                      ]}
+                      selectedKey={normalizeFontFamilyName(editor?.getAttributes('textStyle').fontFamily as string) || 'system-ui'}
+                      onSelect={(k) => editor?.chain().focus().setFontFamily(k as string).run()}
+                      fixedWidthPx={150}
+                    />
+                    {/* Font size dropdown */}
+                    <Dropdown
+                      label={(editor?.getAttributes('textStyle').fontSize || '16px').replace('px','')}
+                      icon={null}
+                      items={[
+                        { key: '12px', label: '12' },
+                        { key: '14px', label: '14' },
+                        { key: '16px', label: '16' },
+                        { key: '18px', label: '18' },
+                        { key: '24px', label: '24' },
+                        { key: '32px', label: '32' },
+                        { key: '48px', label: '48' },
+                      ]}
+                      selectedKey={editor?.getAttributes('textStyle').fontSize || '16px'}
+                      onSelect={(k) => editor?.chain().focus().setMark('textStyle', { fontSize: k as string }).run()}
+                      fixedWidthPx={80}
+                    />
+                    {/* Colors as icon buttons with indicator */}
+                    <button
+                      className={`tool color-btn ${editor?.getAttributes('textStyle').color ? 'active' : ''}`}
+                      aria-label="Цвет текста"
+                      title="Цвет текста"
+                      onClick={() => textColorInputRef.current?.click()}
+                    >
+                      <RiFontColor />
+                      <span className="color-indicator" style={{ backgroundColor: normalizeHexColor(editor?.getAttributes('textStyle').color, '#000000') }} />
+                    </button>
+                    <input
+                      ref={textColorInputRef}
+                      type="color"
+                      style={{ display: 'none' }}
+                      value={normalizeHexColor(editor?.getAttributes('textStyle').color, '#000000')}
+                      onChange={(e) => editor?.chain().focus().setColor(e.target.value).run()}
+                    />
+                    <button
+                      className={`tool color-btn ${editor?.getAttributes('textStyle').backgroundColor ? 'active' : ''}`}
+                      aria-label="Цвет фона текста"
+                      title="Цвет фона текста"
+                      onClick={() => bgColorInputRef.current?.click()}
+                    >
+                      <RiPaintFill />
+                      <span className="color-indicator" style={{ backgroundColor: normalizeHexColor(editor?.getAttributes('textStyle').backgroundColor, '#ffffff') }} />
+                    </button>
+                    <input
+                      ref={bgColorInputRef}
+                      type="color"
+                      style={{ display: 'none' }}
+                      value={normalizeHexColor(editor?.getAttributes('textStyle').backgroundColor, '#ffffff')}
+                      onChange={(e) => editor?.chain().focus().setBackgroundColor(e.target.value).run()}
+                    />
+                  </div>
+                  <div className="tool-sep" aria-hidden="true" />
+                  {/* Group: Alignment */}
+                  <div className="tool-group">
+                    <button className={`tool ${(() => {
+                      const left = editor?.isActive({ textAlign: 'left' });
+                      const none = !editor?.isActive({ textAlign: 'center' }) && !editor?.isActive({ textAlign: 'right' }) && !editor?.isActive({ textAlign: 'justify' });
+                      return left || none ? 'active' : '';
+                    })()}`} onClick={() => editor?.chain().focus().setTextAlign('left').run()} title="По левому"><RiAlignLeft /></button>
+                    <button className={`tool ${editor?.isActive({ textAlign: 'center' }) ? 'active' : ''}`} onClick={() => editor?.chain().focus().setTextAlign('center').run()} title="По центру"><RiAlignCenter /></button>
+                    <button className={`tool ${editor?.isActive({ textAlign: 'right' }) ? 'active' : ''}`} onClick={() => editor?.chain().focus().setTextAlign('right').run()} title="По правому"><RiAlignRight /></button>
+                    <button className={`tool ${editor?.isActive({ textAlign: 'justify' }) ? 'active' : ''}`} onClick={() => editor?.chain().focus().setTextAlign('justify').run()} title="По ширине"><RiAlignJustify /></button>
+                  </div>
+                  <div className="tool-sep" aria-hidden="true" />
+                  {/* Group: Text formatting */}
+                  <div className="tool-group">
+                    <button className={`tool ${editor?.isActive('bold') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleBold().run()} title="Полужирный"><RiBold /></button>
+                    <button className={`tool ${editor?.isActive('italic') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Курсив"><RiItalic /></button>
+                    <button className={`tool ${editor?.isActive('underline') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleUnderline().run()} title="Подчёркнутый"><RiUnderline /></button>
+                    <button className={`tool ${editor?.isActive('strike') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleStrike().run()} title="Зачёркнутый"><RiStrikethrough /></button>
+                    <button className={`tool ${editor?.isActive('highlight') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleHighlight().run()} title="Подсветка"><RiMarkPenLine /></button>
+                    <button className={`tool ${editor?.isActive('code') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleCode().run()} title="Код (встроенный)"><RiCodeLine /></button>
+                  </div>
+                  <div className="tool-sep" aria-hidden="true" />
+                  {/* Group: Paragraph controls */}
+                  <div className="tool-group">
+                    {/* Heading dropdown with icon placeholder and more levels */}
+                    <Dropdown
+                      label=""
+                      icon={(() => {
+                        if (editor?.isActive('heading', { level: 1 })) return <RiH1 />;
+                        if (editor?.isActive('heading', { level: 2 })) return <RiH2 />;
+                        if (editor?.isActive('heading', { level: 3 })) return <RiH3 />;
+                        if (editor?.isActive('heading', { level: 4 })) return <RiH4 />;
+                        if (editor?.isActive('heading', { level: 5 })) return <RiH5 />;
+                        if (editor?.isActive('heading', { level: 6 })) return <RiH6 />;
+                        return <RiParagraph />;
+                      })()}
+                      items={[
+                        { key: 'h1', label: 'Заголовок 1', icon: <RiH1 /> },
+                        { key: 'h2', label: 'Заголовок 2', icon: <RiH2 /> },
+                        { key: 'h3', label: 'Заголовок 3', icon: <RiH3 /> },
+                        { key: 'h4', label: 'Заголовок 4', icon: <RiH4 /> },
+                        { key: 'h5', label: 'Заголовок 5', icon: <RiH5 /> },
+                        { key: 'h6', label: 'Заголовок 6', icon: <RiH6 /> },
+                      ]}
+                      selectedKey={(() => {
+                        for (let lvl = 1; lvl <= 6; lvl++) {
+                          if (editor?.isActive('heading', { level: lvl })) return `h${lvl}`;
+                        }
+                        return '';
+                      })()}
+                      onSelect={(k) => {
+                        const chain = editor?.chain().focus();
+                        if (!chain) return;
+                        const level = (k === 'h1' ? 1 : k === 'h2' ? 2 : k === 'h3' ? 3 : k === 'h4' ? 4 : k === 'h5' ? 5 : 6) as 1|2|3|4|5|6;
+                        if (editor?.isActive('heading', { level })) chain.setParagraph().run();
+                        else chain.setHeading({ level }).run();
+                      }}
+                      active={(() => { for (let lvl = 1; lvl <= 6; lvl++) { if (editor?.isActive('heading', { level: lvl })) return true; } return false; })()}
+                    />
 
-                  {/* Font size */}
-                  <select
-                    className="tool size-select"
-                    value={editor?.getAttributes('textStyle').fontSize || '16px'}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      editor?.chain().focus().setMark('textStyle', { fontSize: v }).run();
-                    }}
-                    title="Размер шрифта"
-                  >
-                    <option value="12px">12</option>
-                    <option value="14px">14</option>
-                    <option value="16px">16</option>
-                    <option value="18px">18</option>
-                    <option value="24px">24</option>
-                    <option value="32px">32</option>
-                    <option value="48px">48</option>
-                  </select>
-
-                  {/* Colors */}
-                  <input
-                    className="tool color-swatch text-color"
-                    aria-label="Цвет текста"
-                    title="Цвет текста"
-                    type="color"
-                    value={normalizeHexColor(editor?.getAttributes('textStyle').color, '#000000')}
-                    onChange={(e) => editor?.chain().focus().setColor(e.target.value).run()}
-                  />
-                  <input
-                    className="tool color-swatch bg-color"
-                    aria-label="Цвет фона текста"
-                    title="Цвет фона текста"
-                    type="color"
-                    value={normalizeHexColor(editor?.getAttributes('textStyle').backgroundColor, '#ffffff')}
-                    onChange={(e) => editor?.chain().focus().setBackgroundColor(e.target.value).run()}
-                  />
-
-                  {/* Alignment buttons */}
-                  <button className={`tool ${editor?.isActive({ textAlign: 'left' }) ? 'active' : ''}`} onClick={() => editor?.chain().focus().setTextAlign('left').run()} title="По левому"><RiAlignLeft /></button>
-                  <button className={`tool ${editor?.isActive({ textAlign: 'center' }) ? 'active' : ''}`} onClick={() => editor?.chain().focus().setTextAlign('center').run()} title="По центру"><RiAlignCenter /></button>
-                  <button className={`tool ${editor?.isActive({ textAlign: 'right' }) ? 'active' : ''}`} onClick={() => editor?.chain().focus().setTextAlign('right').run()} title="По правому"><RiAlignRight /></button>
-                  <button className={`tool ${editor?.isActive({ textAlign: 'justify' }) ? 'active' : ''}`} onClick={() => editor?.chain().focus().setTextAlign('justify').run()} title="По ширине"><RiAlignJustify /></button>
-
-                  {/* Styles */}
-                  <button className={`tool ${editor?.isActive('bold') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleBold().run()} title="Полужирный"><RiBold /></button>
-                  <button className={`tool ${editor?.isActive('italic') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Курсив"><RiItalic /></button>
-                  <button className={`tool ${editor?.isActive('strike') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleStrike().run()} title="Зачёркнутый"><RiStrikethrough /></button>
-                  <button className={`tool ${editor?.isActive('underline') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleUnderline().run()} title="Подчёркнутый"><RiUnderline /></button>
-                  <button className={`tool ${editor?.isActive('highlight') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleHighlight().run()} title="Подсветка"><RiMarkPenLine /></button>
-
-                  {/* Paragraph/Headings buttons */}
-                  <button className={`tool ${editor?.isActive('paragraph') ? 'active' : ''}`} onClick={() => editor?.chain().focus().setParagraph().run()} title="Параграф"><RiParagraph /></button>
-                  <button className={`tool ${editor?.isActive('heading', { level: 1 }) ? 'active' : ''}`} onClick={() => editor?.chain().focus().setHeading({ level: 1 }).run()} title="Заголовок 1"><RiH1 /></button>
-                  <button className={`tool ${editor?.isActive('heading', { level: 2 }) ? 'active' : ''}`} onClick={() => editor?.chain().focus().setHeading({ level: 2 }).run()} title="Заголовок 2"><RiH2 /></button>
-
-                  {/* Lists */}
-                  <button className={`tool ${editor?.isActive('bulletList') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleBulletList().run()} title="Маркированный список"><RiListUnordered /></button>
-                  <button className={`tool ${editor?.isActive('orderedList') ? 'active' : ''}`} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title="Нумерованный список"><RiListOrdered /></button>
-
-                  {/* Code block and image */}
-                  <button className="tool" title="Блок кода" onClick={() => editor?.chain().focus().toggleCodeBlock().run()}><RiCodeBoxLine /></button>
-                  <button className="tool" title="Вставить изображение" onClick={async () => { const r = await window.api.pickImage(); if (!r?.canceled && (r as any).dataUrl) editor?.chain().focus().setImage({ src: (r as any).dataUrl }).run(); }}><RiImageLine /></button>
+                    {/* List type dropdown */}
+                    <Dropdown
+                      label=""
+                      icon={editor?.isActive('orderedList') ? <RiListOrdered /> : editor?.isActive('bulletList') ? <RiListUnordered /> : <RiListUnordered />}
+                      items={[
+                        { key: 'bullet', label: 'Маркированный', icon: <RiListUnordered /> },
+                        { key: 'ordered', label: 'Нумерованный', icon: <RiListOrdered /> },
+                      ]}
+                      selectedKey={editor?.isActive('orderedList') ? 'ordered' : editor?.isActive('bulletList') ? 'bullet' : ''}
+                      onSelect={(k) => {
+                        const c = editor?.chain().focus();
+                        if (!c) return;
+                        if (k === 'bullet') c.toggleBulletList().run();
+                        if (k === 'ordered') c.toggleOrderedList().run();
+                      }}
+                      active={editor?.isActive('orderedList') || editor?.isActive('bulletList')}
+                    />
+                    {/* Code block */}
+                    <button className={`tool ${editor?.isActive('codeBlock') ? 'active' : ''}`} title="Блок кода" onClick={() => editor?.chain().focus().toggleCodeBlock().run()}><RiCodeBoxLine /></button>
+                    {/* Image (kept here) */}
+                    <button className="tool" title="Вставить изображение" onClick={async () => { const r = await window.api.pickImage(); if (!r?.canceled && (r as any).dataUrl) editor?.chain().focus().setImage({ src: (r as any).dataUrl }).run(); }}><RiImageLine /></button>
+                  </div>
+                  <div className="tool-sep" aria-hidden="true" />
+                  {/* Group: Sub/Superscript */}
+                  <div className="tool-group">
+                    <button className={`tool ${editor?.isActive('subscript') ? 'active' : ''}`} onClick={() => (editor as any)?.chain().focus().toggleSubscript().run()} title="Нижний индекс"><RiSubscript /></button>
+                    <button className={`tool ${editor?.isActive('superscript') ? 'active' : ''}`} onClick={() => (editor as any)?.chain().focus().toggleSuperscript().run()} title="Верхний индекс"><RiSuperscript /></button>
+                  </div>
                 </div>
               )}
 
               {activeTool === 'tables' && (
-                <div className="toolbar" style={{ justifyContent: 'center' }}>
-                  <button onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}>Вставить таблицу</button>
-                  <button onClick={() => editor?.chain().focus().addColumnBefore().run()}>Колонка слева</button>
-                  <button onClick={() => editor?.chain().focus().addColumnAfter().run()}>Колонка справа</button>
-                  <button onClick={() => editor?.chain().focus().addRowBefore().run()}>Строка выше</button>
-                  <button onClick={() => editor?.chain().focus().addRowAfter().run()}>Строка ниже</button>
-                  <button onClick={() => editor?.chain().focus().deleteColumn().run()}>Удалить колонку</button>
-                  <button onClick={() => editor?.chain().focus().deleteRow().run()}>Удалить строку</button>
-                  <button onClick={() => editor?.chain().focus().deleteTable().run()}>Удалить таблицу</button>
+                <div className="toolbar text-toolbar">
+                  {/* Group: Create/insert table */}
+                  <div className="tool-group">
+                    <Dropdown
+                      label="Вставить"
+                      icon={<RiTableLine />}
+                      items={[
+                        { key: '2x2', label: '2 × 2' },
+                        { key: '3x3h', label: '3 × 3 (шапка)' },
+                        { key: '3x3', label: '3 × 3' },
+                        { key: '4x4h', label: '4 × 4 (шапка)' },
+                        { key: '4x4', label: '4 × 4' },
+                      ]}
+                      onSelect={(k) => {
+                        const withHeaderRow = k.endsWith('h');
+                        const size = k.replace('h','');
+                        const [colsStr, rowsStr] = size.split('x');
+                        const cols = parseInt(colsStr, 10);
+                        const rows = parseInt(rowsStr, 10);
+                        try {
+                          editor?.chain().focus().insertTable({ rows, cols, withHeaderRow }).run();
+                        } catch (error) {
+                          console.error('Error inserting table:', error);
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="tool-sep" aria-hidden="true" />
+
+                  {/* Group: Add rows/cols */}
+                  <div className="tool-group">
+                    <button className="tool" title="Строка выше" onClick={() => {
+                      try { editor?.chain().focus().addRowBefore().run(); } catch (e) { console.warn('addRowBefore not available'); }
+                    }}><RiArrowUpLine /></button>
+                    <button className="tool" title="Строка ниже" onClick={() => {
+                      try { editor?.chain().focus().addRowAfter().run(); } catch (e) { console.warn('addRowAfter not available'); }
+                    }}><RiArrowDownLine /></button>
+                    <button className="tool" title="Колонка слева" onClick={() => {
+                      try { editor?.chain().focus().addColumnBefore().run(); } catch (e) { console.warn('addColumnBefore not available'); }
+                    }}><RiArrowLeftLine /></button>
+                    <button className="tool" title="Колонка справа" onClick={() => {
+                      try { editor?.chain().focus().addColumnAfter().run(); } catch (e) { console.warn('addColumnAfter not available'); }
+                    }}><RiArrowRightLine /></button>
+                  </div>
+                  <div className="tool-sep" aria-hidden="true" />
+
+                  {/* Group: Row/Cell formatting */}
+                  <div className="tool-group">
+                    <button className="tool"
+                      title="Объединить ячейки"
+                      onClick={() => {
+                        try {
+                          editor?.chain().focus().mergeCells().run();
+                        } catch (e) {
+                          console.warn('mergeCells command not available');
+                        }
+                      }}>Склеить</button>
+                    <button className="tool"
+                      title="Разделить ячейку"
+                      onClick={() => {
+                        try {
+                          editor?.chain().focus().splitCell().run();
+                        } catch (e) {
+                          console.warn('splitCell command not available');
+                        }
+                      }}>Разделить</button>
+                    <button className="tool" title="Строка шапки" onClick={() => {
+                      try { editor?.chain().focus().toggleHeaderRow().run(); } catch (e) { console.warn('toggleHeaderRow not available'); }
+                    }}>Шапка строки</button>
+                    <button className="tool" title="Колонки шапки" onClick={() => {
+                      try { editor?.chain().focus().toggleHeaderColumn().run(); } catch (e) { console.warn('toggleHeaderColumn not available'); }
+                    }}>Шапка колонки</button>
+                    <button className="tool" title="Ячейка шапка" onClick={() => {
+                      try { editor?.chain().focus().toggleHeaderCell().run(); } catch (e) { console.warn('toggleHeaderCell not available'); }
+                    }}>Яч. шапка</button>
+                  </div>
+                  <div className="tool-sep" aria-hidden="true" />
+
+                  {/* Group: Delete rows/cols */}
+                  <div className="tool-group">
+                    <button className="tool" title="Удалить строку" onClick={() => {
+                      try { editor?.chain().focus().deleteRow().run(); } catch (e) { console.warn('deleteRow not available'); }
+                    }}><RiDeleteBack2Line /></button>
+                    <button className="tool" title="Удалить колонку" onClick={() => {
+                      try { editor?.chain().focus().deleteColumn().run(); } catch (e) { console.warn('deleteColumn not available'); }
+                    }}><RiDeleteBin2Line /></button>
+                  </div>
+                  <div className="tool-sep" aria-hidden="true" />
+
+                  {/* Row height presets removed */}
+
+                  {/* Group: Collapse/Hide - always visible */}
+                  <div className="tool-group">
+                    {(() => {
+                      // Check if we're in a table and get its state
+                      let collapsed = false;
+                      let isInTable = false;
+                      
+                      if (editor?.isActive('table')) {
+                        const attrs: any = editor.getAttributes('table') || {};
+                        collapsed = Boolean(attrs.collapsed);
+                        isInTable = true;
+                      }
+                      
+                      const toggle = () => {
+                        try {
+                          if (editor && (editor as any).commands?.toggleTableCollapsed) {
+                            (editor as any).chain().focus().toggleTableCollapsed().run();
+                          } else {
+                            console.warn('toggleTableCollapsed command not available');
+                          }
+                        } catch (e) {
+                          console.warn('Table collapse toggle failed:', e);
+                        }
+                      };
+                      
+                      // Show button state based on current table or disabled if not in table
+                      if (isInTable) {
+                        return collapsed ? (
+                          <button className="tool" title="Показать таблицу" onClick={toggle}><RiEyeLine /> Показать</button>
+                        ) : (
+                          <button className="tool" title="Скрыть таблицу" onClick={toggle}><RiEyeOffLine /> Скрыть</button>
+                        );
+                      } else {
+                        return (
+                          <button className="tool disabled" title="Поместите курсор в таблицу" disabled><RiEyeOffLine /> Скрыть</button>
+                        );
+                      }
+                    })()}
+                  </div>
+                  <div className="tool-sep" aria-hidden="true" />
+
+                  {/* Group: Delete table */}
+                  <div className="tool-group">
+                    <button className="tool" title="Удалить таблицу" onClick={() => {
+                      try { editor?.chain().focus().deleteTable().run(); } catch (e) { console.warn('deleteTable not available'); }
+                    }}><RiDeleteBinLine /></button>
+                  </div>
                 </div>
               )}
 
               {activeTool === 'formulas' && (
-                <div className="toolbar" style={{ justifyContent: 'center' }}>
-                  <FormulaBar editor={editor} />
+                <div className="toolbar formula-wrapper">
+                  <FormulaBar editor={editor} mathEditingState={mathEditingState} />
                 </div>
               )}
 
               {activeTool === 'graphs' && (
-                <div className="toolbar" style={{ justifyContent: 'center' }}>
-                  <GraphsBar editor={editor} />
+                <div className="toolbar graphs-wrapper">
+                  <GraphsBar editor={editor} selectedGraph={selectedGraph} setSelectedGraph={setSelectedGraph} />
                 </div>
               )}
                 </div>
@@ -723,7 +1667,9 @@ export const App: React.FC = () => {
                   <button className={`tool-tab ${activeTool === 'graphs' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'graphs' ? null : 'graphs')}>Graphs</button>
                 </div>
               </div>
-
+              <DragHandleReact editor={editor}>
+                <div className="tiptap-drag-handle" />
+              </DragHandleReact>
               <EditorContent editor={editor} />
             </div>
           )}
@@ -733,36 +1679,643 @@ export const App: React.FC = () => {
   );
 };
 
-const FormulaBar: React.FC<{ editor: any }> = ({ editor }) => {
-  const [latex, setLatex] = useState('E = mc^2');
-  function insertFormula() {
-    const html = `<span class="formula">$${latex}$</span>`;
-    editor?.commands.insertContent(html);
+const FormulaBar: React.FC<{ 
+  editor: any; 
+  mathEditingState: { isEditing: boolean; originalPosition: number; mathType: 'inline' | 'block'; originalLatex: string; } | null;
+}> = ({ editor, mathEditingState }) => {
+  
+  // Symbols (brackets, braces, arrows, etc.)
+  const symbols = [
+    // Brackets and braces
+    { key: 'lparen', label: '(', code: '(' },
+    { key: 'rparen', label: ')', code: ')' },
+    { key: 'lbracket', label: '[', code: '[' },
+    { key: 'rbracket', label: ']', code: ']' },
+    { key: 'lbrace', label: '{', code: '\\{' },
+    { key: 'rbrace', label: '}', code: '\\}' },
+    { key: 'langle', label: '⟨', code: '\\langle' },
+    { key: 'rangle', label: '⟩', code: '\\rangle' },
+    { key: 'lceil', label: '⌈', code: '\\lceil' },
+    { key: 'rceil', label: '⌉', code: '\\rceil' },
+    { key: 'lfloor', label: '⌊', code: '\\lfloor' },
+    { key: 'rfloor', label: '⌋', code: '\\rfloor' },
+    // Large brackets
+    { key: 'bigl', label: '\\big(', code: '\\bigl(' },
+    { key: 'bigr', label: '\\big)', code: '\\bigr)' },
+    { key: 'Bigl', label: '\\Big[', code: '\\Bigl[' },
+    { key: 'Bigr', label: '\\Big]', code: '\\Bigr]' },
+    { key: 'biggl', label: '\\bigg{', code: '\\biggl\\{' },
+    { key: 'biggr', label: '\\bigg}', code: '\\biggr\\}' },
+    // Arrows
+    { key: 'leftarrow', label: '←', code: '\\leftarrow' },
+    { key: 'rightarrow', label: '→', code: '\\rightarrow' },
+    { key: 'leftrightarrow', label: '↔', code: '\\leftrightarrow' },
+    { key: 'uparrow', label: '↑', code: '\\uparrow' },
+    { key: 'downarrow', label: '↓', code: '\\downarrow' },
+    { key: 'Leftarrow', label: '⇐', code: '\\Leftarrow' },
+    { key: 'Rightarrow', label: '⇒', code: '\\Rightarrow' },
+    { key: 'Leftrightarrow', label: '⇔', code: '\\Leftrightarrow' },
+    // Special symbols
+    { key: 'infty', label: '∞', code: '\\infty' },
+    { key: 'partial', label: '∂', code: '\\partial' },
+    { key: 'nabla', label: '∇', code: '\\nabla' },
+    { key: 'angle', label: '∠', code: '\\angle' },
+    { key: 'triangle', label: '△', code: '\\triangle' },
+    { key: 'square', label: '□', code: '\\square' },
+    { key: 'diamond', label: '◊', code: '\\diamond' },
+    { key: 'star', label: '⋆', code: '\\star' },
+    { key: 'dagger', label: '†', code: '\\dagger' },
+    { key: 'ddagger', label: '‡', code: '\\ddagger' },
+    { key: 'sharp', label: '♯', code: '\\sharp' },
+    { key: 'flat', label: '♭', code: '\\flat' },
+    { key: 'natural', label: '♮', code: '\\natural' },
+    { key: 'clubsuit', label: '♣', code: '\\clubsuit' },
+    { key: 'diamondsuit', label: '♢', code: '\\diamondsuit' },
+    { key: 'heartsuit', label: '♡', code: '\\heartsuit' },
+    { key: 'spadesuit', label: '♠', code: '\\spadesuit' },
+  ];
+  
+  // Greek letters
+  const greekLetters = [
+    { key: 'alpha', label: 'α', code: '\\alpha' },
+    { key: 'beta', label: 'β', code: '\\beta' },
+    { key: 'gamma', label: 'γ', code: '\\gamma' },
+    { key: 'delta', label: 'δ', code: '\\delta' },
+    { key: 'epsilon', label: 'ε', code: '\\epsilon' },
+    { key: 'zeta', label: 'ζ', code: '\\zeta' },
+    { key: 'eta', label: 'η', code: '\\eta' },
+    { key: 'theta', label: 'θ', code: '\\theta' },
+    { key: 'iota', label: 'ι', code: '\\iota' },
+    { key: 'kappa', label: 'κ', code: '\\kappa' },
+    { key: 'lambda', label: 'λ', code: '\\lambda' },
+    { key: 'mu', label: 'μ', code: '\\mu' },
+    { key: 'nu', label: 'ν', code: '\\nu' },
+    { key: 'xi', label: 'ξ', code: '\\xi' },
+    { key: 'omicron', label: 'ο', code: '\\omicron' },
+    { key: 'pi', label: 'π', code: '\\pi' },
+    { key: 'rho', label: 'ρ', code: '\\rho' },
+    { key: 'sigma', label: 'σ', code: '\\sigma' },
+    { key: 'tau', label: 'τ', code: '\\tau' },
+    { key: 'upsilon', label: 'υ', code: '\\upsilon' },
+    { key: 'phi', label: 'φ', code: '\\phi' },
+    { key: 'chi', label: 'χ', code: '\\chi' },
+    { key: 'psi', label: 'ψ', code: '\\psi' },
+    { key: 'omega', label: 'ω', code: '\\omega' },
+    // Capital Greek letters
+    { key: 'Alpha', label: 'Α', code: '\\Alpha' },
+    { key: 'Beta', label: 'Β', code: '\\Beta' },
+    { key: 'Gamma', label: 'Γ', code: '\\Gamma' },
+    { key: 'Delta', label: 'Δ', code: '\\Delta' },
+    { key: 'Epsilon', label: 'Ε', code: '\\Epsilon' },
+    { key: 'Zeta', label: 'Ζ', code: '\\Zeta' },
+    { key: 'Eta', label: 'Η', code: '\\Eta' },
+    { key: 'Theta', label: 'Θ', code: '\\Theta' },
+    { key: 'Iota', label: 'Ι', code: '\\Iota' },
+    { key: 'Kappa', label: 'Κ', code: '\\Kappa' },
+    { key: 'Lambda', label: 'Λ', code: '\\Lambda' },
+    { key: 'Mu', label: 'Μ', code: '\\Mu' },
+    { key: 'Nu', label: 'Ν', code: '\\Nu' },
+    { key: 'Xi', label: 'Ξ', code: '\\Xi' },
+    { key: 'Omicron', label: 'Ο', code: '\\Omicron' },
+    { key: 'Pi', label: 'Π', code: '\\Pi' },
+    { key: 'Rho', label: 'Ρ', code: '\\Rho' },
+    { key: 'Sigma', label: 'Σ', code: '\\Sigma' },
+    { key: 'Tau', label: 'Τ', code: '\\Tau' },
+    { key: 'Upsilon', label: 'Υ', code: '\\Upsilon' },
+    { key: 'Phi', label: 'Φ', code: '\\Phi' },
+    { key: 'Chi', label: 'Χ', code: '\\Chi' },
+    { key: 'Psi', label: 'Ψ', code: '\\Psi' },
+    { key: 'Omega', label: 'Ω', code: '\\Omega' },
+  ];
+
+  // Mathematical operators
+  const operators = [
+    { key: 'plus', label: '+', code: '+' },
+    { key: 'minus', label: '−', code: '-' },
+    { key: 'times', label: '×', code: '\\times' },
+    { key: 'div', label: '÷', code: '\\div' },
+    { key: 'pm', label: '±', code: '\\pm' },
+    { key: 'mp', label: '∓', code: '\\mp' },
+    { key: 'cdot', label: '·', code: '\\cdot' },
+    { key: 'bullet', label: '∙', code: '\\bullet' },
+    { key: 'ast', label: '∗', code: '\\ast' },
+    { key: 'star', label: '⋆', code: '\\star' },
+    { key: 'circ', label: '∘', code: '\\circ' },
+    { key: 'oplus', label: '⊕', code: '\\oplus' },
+    { key: 'ominus', label: '⊖', code: '\\ominus' },
+    { key: 'otimes', label: '⊗', code: '\\otimes' },
+    { key: 'oslash', label: '⊘', code: '\\oslash' },
+    { key: 'odot', label: '⊙', code: '\\odot' },
+  ];
+
+  // Relations
+  const relations = [
+    { key: 'eq', label: '=', code: '=' },
+    { key: 'neq', label: '≠', code: '\\neq' },
+    { key: 'lt', label: '<', code: '<' },
+    { key: 'gt', label: '>', code: '>' },
+    { key: 'leq', label: '≤', code: '\\leq' },
+    { key: 'geq', label: '≥', code: '\\geq' },
+    { key: 'equiv', label: '≡', code: '\\equiv' },
+    { key: 'approx', label: '≈', code: '\\approx' },
+    { key: 'sim', label: '∼', code: '\\sim' },
+    { key: 'propto', label: '∝', code: '\\propto' },
+    { key: 'parallel', label: '∥', code: '\\parallel' },
+    { key: 'perp', label: '⊥', code: '\\perp' },
+    { key: 'in', label: '∈', code: '\\in' },
+    { key: 'notin', label: '∉', code: '\\notin' },
+    { key: 'subset', label: '⊂', code: '\\subset' },
+    { key: 'supset', label: '⊃', code: '\\supset' },
+    { key: 'subseteq', label: '⊆', code: '\\subseteq' },
+    { key: 'supseteq', label: '⊇', code: '\\supseteq' },
+  ];
+
+  // Arrows
+  const arrows = [
+    { key: 'leftarrow', label: '←', code: '\\leftarrow' },
+    { key: 'rightarrow', label: '→', code: '\\rightarrow' },
+    { key: 'leftrightarrow', label: '↔', code: '\\leftrightarrow' },
+    { key: 'Leftarrow', label: '⇐', code: '\\Leftarrow' },
+    { key: 'Rightarrow', label: '⇒', code: '\\Rightarrow' },
+    { key: 'Leftrightarrow', label: '⇔', code: '\\Leftrightarrow' },
+    { key: 'uparrow', label: '↑', code: '\\uparrow' },
+    { key: 'downarrow', label: '↓', code: '\\downarrow' },
+    { key: 'updownarrow', label: '↕', code: '\\updownarrow' },
+    { key: 'Uparrow', label: '⇑', code: '\\Uparrow' },
+    { key: 'Downarrow', label: '⇓', code: '\\Downarrow' },
+    { key: 'Updownarrow', label: '⇕', code: '\\Updownarrow' },
+  ];
+
+  // Functions and symbols
+  const functions = [
+    // Basic trigonometric functions
+    { key: 'sin', label: 'sin', code: '\\sin' },
+    { key: 'cos', label: 'cos', code: '\\cos' },
+    { key: 'tan', label: 'tan', code: '\\tan' },
+    { key: 'cot', label: 'cot', code: '\\cot' },
+    { key: 'arcsin', label: 'arcsin', code: '\\arcsin' },
+    { key: 'arccos', label: 'arccos', code: '\\arccos' },
+    { key: 'arctan', label: 'arctan', code: '\\arctan' },
+    { key: 'sinh', label: 'sinh', code: '\\sinh' },
+    { key: 'cosh', label: 'cosh', code: '\\cosh' },
+    { key: 'tanh', label: 'tanh', code: '\\tanh' },
+    // Logarithmic functions
+    { key: 'log', label: 'log', code: '\\log' },
+    { key: 'ln', label: 'ln', code: '\\ln' },
+    { key: 'exp', label: 'exp', code: '\\exp' },
+    // Limits and calculus
+    { key: 'lim', label: 'lim', code: '\\lim_{x \\to }' },
+    { key: 'sup', label: 'sup', code: '\\sup' },
+    { key: 'inf', label: 'inf', code: '\\inf' },
+    { key: 'max', label: 'max', code: '\\max' },
+    { key: 'min', label: 'min', code: '\\min' },
+    // Roots and fractions
+    { key: 'sqrt', label: '√', code: '\\sqrt{}' },
+    { key: 'sqrt3', label: '∛', code: '\\sqrt[3]{}' },
+    { key: 'frac', label: 'a/b', code: '\\frac{}{}' },
+    { key: 'dfrac', label: 'A/B', code: '\\dfrac{}{}' },
+    { key: 'tfrac', label: 'a/b', code: '\\tfrac{}{}' },
+    // Sums and products
+    { key: 'sum', label: '∑', code: '\\sum_{}^{}' },
+    { key: 'prod', label: '∏', code: '\\prod_{}^{}' },
+    // Integrals
+    { key: 'int', label: '∫', code: '\\int_{}^{}' },
+    { key: 'iint', label: '∬', code: '\\iint' },
+    { key: 'oint', label: '∮', code: '\\oint' },
+    // Other functions
+    { key: 'det', label: 'det', code: '\\det' },
+    { key: 'gcd', label: 'gcd', code: '\\gcd' },
+  ];
+
+  function insertInlineFormula(formula: string) {
+    if (!editor || !formula.trim()) return;
+    
+    if (mathEditingState?.isEditing) {
+      // We're in editing mode - insert directly into the active input
+      insertIntoActiveInput(formula);
+    } else {
+      // Normal mode - create new math node
+      const hasSelection = !editor.state.selection.empty;
+      if (hasSelection) {
+        editor.chain().setInlineMath().focus().run();
+      } else {
+        editor.chain().insertInlineMath({ latex: formula }).focus().run();
+      }
+    }
   }
+
+  function insertBlockFormula(formula: string) {
+    if (!editor || !formula.trim()) return;
+    
+    if (mathEditingState?.isEditing) {
+      // We're in editing mode - insert directly into the active input
+      insertIntoActiveInput(formula);
+    } else {
+      // Normal mode - create new math node
+      const hasSelection = !editor.state.selection.empty;
+      if (hasSelection) {
+        editor.chain().setBlockMath().focus().run();
+      } else {
+        editor.chain().insertBlockMath({ latex: formula }).focus().run();
+      }
+    }
+  }
+
+  function insertSymbol(code: string) {
+    if (!editor) return;
+    
+    if (mathEditingState?.isEditing) {
+      // We're in editing mode - insert directly into the active input
+      insertIntoActiveInput(code);
+    } else {
+      // Normal mode - create new inline math with the symbol
+      editor.chain().insertInlineMath({ latex: code }).focus().run();
+    }
+  }
+
+  // Helper function to insert text into the active math editing input
+  function insertIntoActiveInput(text: string) {
+    const activeInput = document.querySelector('.math-editing-node input') as HTMLInputElement;
+    if (activeInput) {
+      const startPos = activeInput.selectionStart || 0;
+      const endPos = activeInput.selectionEnd || 0;
+      const currentValue = activeInput.value;
+      
+      // Insert the text at the current cursor position
+      const newValue = currentValue.slice(0, startPos) + text + currentValue.slice(endPos);
+      activeInput.value = newValue;
+      
+      // Set cursor position after the inserted text
+      const newCursorPos = startPos + text.length;
+      activeInput.setSelectionRange(newCursorPos, newCursorPos);
+      
+      // Trigger change event and keep focus
+      activeInput.dispatchEvent(new Event('input', { bubbles: true }));
+      activeInput.dispatchEvent(new Event('change', { bubbles: true }));
+      activeInput.focus();
+    }
+  }
+
+  // Helper function to check if we're in LaTeX editing mode
+  function isInLatexEditingMode() {
+    return mathEditingState?.isEditing || false;
+  }
+
+  function deleteSelectedFormula() {
+    if (!editor) return;
+    
+    // Check if we're in an inline math node
+    if (editor.isActive('inline-math')) {
+      editor.chain().deleteInlineMath().focus().run();
+    }
+    // Check if we're in a block math node
+    else if (editor.isActive('block-math')) {
+      editor.chain().deleteBlockMath().focus().run();
+    }
+    // Fallback to general deletion
+    else {
+      editor.commands.deleteSelection();
+    }
+  }
+
+  const editingMode = isInLatexEditingMode();
+
   return (
-    <>
-      <input value={latex} onChange={(e) => setLatex(e.target.value)} placeholder="TeX формула" />
-      <button onClick={insertFormula}>Вставить формулу</button>
-      <span className="muted">(рендер в PDF через браузерный движок; для точного KaTeX-рендера можно расширить позже)</span>
-    </>
+    <div className="formula-toolbar">
+      
+      {/* Group 1: Quick formulas */}
+      <div className="tool-group">
+        <button 
+          className="tool" 
+          onClick={() => insertInlineFormula('E=mc^2')}
+          onMouseDown={(e) => mathEditingState?.isEditing && e.preventDefault()}
+          title="Вставить простую встроенную формулу. Для редактирования нажмите на формулу, для выхода - ESC"
+        >
+          Встроенная
+        </button>
+        <button 
+          className="tool" 
+          onClick={() => insertBlockFormula('\\frac{a}{b} = \\frac{c}{d}')}
+          onMouseDown={(e) => mathEditingState?.isEditing && e.preventDefault()}
+          title="Вставить простую блочную формулу. Для редактирования нажмите на формулу, для выхода - ESC"
+        >
+          Блочная
+        </button>
+      </div>
+      <div className="tool-sep" aria-hidden="true" />
+
+      {/* Group 2: Symbol categories (all except Functions) */}
+      <div className="tool-group">
+        <GridDropdown
+          label="Символы"
+          icon={null}
+          items={symbols.map(symbol => ({
+            key: symbol.key,
+            label: `${symbol.label} (${symbol.code})`,
+            icon: <span className="grid-dropdown-symbol">{symbol.label}</span>
+          }))}
+          onSelect={(key) => {
+            const symbol = symbols.find(s => s.key === key);
+            if (symbol) insertSymbol(symbol.code);
+          }}
+          columns={6}
+          mathEditingState={mathEditingState}
+        />
+        <GridDropdown
+          label="Греческие"
+          icon={null}
+          items={greekLetters.map(letter => ({
+            key: letter.key,
+            label: `${letter.label} (${letter.code})`,
+            icon: <span style={{ fontFamily: 'serif', fontSize: '18px' }}>{letter.label}</span>
+          }))}
+          onSelect={(key) => {
+            const symbol = greekLetters.find(s => s.key === key);
+            if (symbol) insertSymbol(symbol.code);
+          }}
+          columns={6}
+          mathEditingState={mathEditingState}
+        />
+        <GridDropdown
+          label="Операторы"
+          icon={null}
+          items={operators.map(op => ({
+            key: op.key,
+            label: `${op.label} (${op.code})`,
+            icon: <span style={{ fontFamily: 'serif', fontSize: '18px' }}>{op.label}</span>
+          }))}
+          onSelect={(key) => {
+            const operator = operators.find(op => op.key === key);
+            if (operator) insertSymbol(operator.code);
+          }}
+          columns={5}
+          mathEditingState={mathEditingState}
+        />
+        <GridDropdown
+          label="Отношения"
+          icon={null}
+          items={relations.map(rel => ({
+            key: rel.key,
+            label: `${rel.label} (${rel.code})`,
+            icon: <span style={{ fontFamily: 'serif', fontSize: '18px' }}>{rel.label}</span>
+          }))}
+          onSelect={(key) => {
+            const relation = relations.find(rel => rel.key === key);
+            if (relation) insertSymbol(relation.code);
+          }}
+          columns={5}
+          mathEditingState={mathEditingState}
+        />
+      </div>
+      <div className="tool-sep" aria-hidden="true" />
+
+      {/* Group 3: Functions */}
+      <div className="tool-group">
+        <GridDropdown
+          label="Функции"
+          icon={null}
+          items={functions.map(func => ({
+            key: func.key,
+            label: `${func.label} (${func.code})`,
+            icon: <span style={{ fontFamily: 'serif', fontSize: '18px' }}>{func.label}</span>
+          }))}
+          onSelect={(key) => {
+            const func = functions.find(f => f.key === key);
+            if (func) {
+              insertSymbol(func.code);
+            }
+          }}
+          columns={5}
+          mathEditingState={mathEditingState}
+        />
+      </div>
+    </div>
   );
 };
 
-const GraphsBar: React.FC<{ editor: any }> = ({ editor }) => {
-  const defaultData = [
-    { name: 'A', value: 12 },
-    { name: 'B', value: 30 },
-    { name: 'C', value: 18 },
-  ];
-  function insertGraph() {
-    const payload = encodeURIComponent(JSON.stringify(defaultData));
-    const html = `<div class="graph" data-chart="bar" data-payload="${payload}">[Graph]</div>`;
-    editor?.commands.insertContent(html);
+const GraphsBar: React.FC<{ editor: any; selectedGraph: any; setSelectedGraph: (graph: any) => void }> = ({ editor, selectedGraph, setSelectedGraph }) => {
+
+  function createGraph(graphType: string) {
+    if (!editor || !(editor as any).commands?.insertGraph) {
+      console.warn('Команда insertGraph недоступна');
+      return;
+    }
+
+    // Generate unique ID
+    const currentTime = Date.now();
+    const randomNumber = Math.floor(Math.random() * 1000000);
+    const uniqueGraphId = 'graph-' + currentTime.toString() + '-' + randomNumber.toString();
+    
+    // Define different graph templates
+    const graphTemplates: Record<string, { data: any[], title: string }> = {
+      'line': {
+        data: [{
+          x: [1, 2, 3, 4, 5],
+          y: [2, 4, 3, 5, 6],
+          type: 'scatter',
+          mode: 'lines+markers',
+          name: 'Линейный график'
+        }],
+        title: 'Линейный график'
+      },
+      'bar': {
+        data: [{
+          x: ['A', 'B', 'C', 'D', 'E'],
+          y: [20, 14, 23, 25, 22],
+          type: 'bar',
+          name: 'Столбчатая диаграмма'
+        }],
+        title: 'Столбчатая диаграмма'
+      },
+      'scatter': {
+        data: [{
+          x: [1, 2, 3, 4, 5, 6, 7, 8],
+          y: [2, 4, 3, 5, 6, 8, 7, 9],
+          mode: 'markers',
+          type: 'scatter',
+          name: 'Точечная диаграмма'
+        }],
+        title: 'Точечная диаграмма'
+      },
+      'pie': {
+        data: [{
+          values: [19, 26, 55],
+          labels: ['Жилой', 'Нежилой', 'Коммунальный'],
+          type: 'pie',
+          name: 'Круговая диаграмма'
+        }],
+        title: 'Круговая диаграмма'
+      },
+      'histogram': {
+        data: [{
+          x: [1, 2, 2, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 5],
+          type: 'histogram',
+          name: 'Гистограмма'
+        }],
+        title: 'Гистограмма'
+      }
+    }
+
+    const selectedTemplate = graphTemplates[graphType];
+    const template = selectedTemplate || graphTemplates.line;
+    
+    (editor as any).commands.insertGraph({
+      id: uniqueGraphId,
+      graphData: template.data,
+      graphLayout: {
+        title: {
+          text: template.title,
+          font: {
+            size: 16,
+            color: '#000000'
+          }
+        },
+        width: 500,
+        height: 350,
+        xaxis: { 
+          title: {
+            text: 'Ось X',
+            font: {
+              size: 14,
+              color: '#000000'
+            }
+          }
+        },
+        yaxis: { 
+          title: {
+            text: 'Ось Y',
+            font: {
+              size: 14,
+              color: '#000000'
+            }
+          }
+        },
+        margin: {
+          l: 60,
+          r: 30,
+          t: 60,
+          b: 60
+        },
+        plot_bgcolor: 'white',
+        paper_bgcolor: 'white'
+      }
+    });
   }
+
+  function editSelectedGraph() {
+    if (selectedGraph && selectedGraph.handleEdit) {
+      selectedGraph.handleEdit()
+    }
+  }
+
+  function deleteSelectedGraph() {
+    if (selectedGraph && selectedGraph.deleteNode) {
+      // Store editor reference before deletion
+      const editorElement = editor?.view?.dom
+      
+      selectedGraph.deleteNode()
+      setSelectedGraph(null)
+      
+      // Restore focus to editor after deletion to prevent cursor disappearing
+      setTimeout(() => {
+        if (editor && editor.view) {
+          // Get current selection position
+          const { state } = editor.view
+          const currentPos = state.selection.from
+          
+          // Restore focus with proper text selection
+          editor.chain()
+            .focus()
+            .setTextSelection(currentPos)
+            .run()
+          
+          // Additional steps to ensure cursor visibility
+          setTimeout(() => {
+            if (editor.view && editor.view.dom) {
+              editor.view.dom.focus()
+              // Force cursor to be visible by dispatching a selection update
+              const { state, dispatch } = editor.view
+              const tr = state.tr.setSelection(state.selection)
+              dispatch(tr)
+            }
+          }, 50)
+        }
+      }, 150)
+    }
+  }
+
+  function exportSelectedGraph() {
+    if (selectedGraph) {
+      // Find the Plotly graph element and export it
+      const graphElement = document.querySelector(`[data-graph-id="${selectedGraph.graphId}"] .js-plotly-plot`)
+      if (graphElement && (window as any).Plotly) {
+        (window as any).Plotly.toImage(graphElement, {
+          format: 'png',
+          width: 800,
+          height: 600
+        }).then((dataUrl: string) => {
+          // Create download link
+          const link = document.createElement('a')
+          link.download = `graph-${selectedGraph.graphId}.png`
+          link.href = dataUrl
+          link.click()
+        }).catch((err: any) => {
+          console.error('Не удалось экспортировать график:', err)
+          alert('Не удалось экспортировать график. Убедитесь, что график полностью загружен.')
+        })
+      } else {
+        alert('График не выбран или Plotly недоступен')
+      }
+    }
+  }
+
   return (
     <>
-      <button onClick={insertGraph}>Вставить график (bar)</button>
-      <span className="muted">(визуализация в редакторе упростнена; можно сделать виджет с Recharts)</span>
+      {/* Group: Create graphs */}
+      <div className="tool-group">
+        <Dropdown
+          label="Создать"
+          icon={<RiAddLine />}
+          items={[
+            { key: 'line', label: 'Линейный график', icon: <span>📈</span> },
+            { key: 'bar', label: 'Столбчатая диаграмма', icon: <span>📊</span> },
+            { key: 'scatter', label: 'Точечная диаграмма', icon: <span>⚫</span> },
+            { key: 'pie', label: 'Круговая диаграмма', icon: <span>🥧</span> },
+            { key: 'histogram', label: 'Гистограмма', icon: <span>📶</span> },
+          ]}
+          onSelect={(key) => createGraph(key)}
+          fixedWidthPx={130}
+        />
+      </div>
+      <div className="tool-sep" aria-hidden="true" />
+      
+      {/* Group: Graph operations */}
+      <div className="tool-group">
+        <button 
+          className={`tool ${selectedGraph ? '' : 'disabled'}`}
+          onClick={editSelectedGraph}
+          disabled={!selectedGraph}
+          title={selectedGraph ? "Редактировать выбранный график" : "Выберите график для редактирования"}
+        >
+          <RiEditLine />
+        </button>
+        <button 
+          className={`tool ${selectedGraph ? '' : 'disabled'}`}
+          onClick={deleteSelectedGraph}
+          disabled={!selectedGraph}
+          title={selectedGraph ? "Удалить выбранный график" : "Выберите график для удаления"}
+        >
+          <RiDeleteBinLine />
+        </button>
+        <button 
+          className={`tool ${selectedGraph ? '' : 'disabled'}`}
+          onClick={exportSelectedGraph}
+          disabled={!selectedGraph}
+          title={selectedGraph ? "Экспортировать выбранный график в PNG" : "Выберите график для экспорта"}
+        >
+          <RiImageLine />
+        </button>
+      </div>
     </>
   );
 };

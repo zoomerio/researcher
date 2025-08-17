@@ -114,7 +114,7 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   padding: 0 12px 0 18px; /* move a bit to the right */
   background: transparent;
   position: relative; /* stacking context anchor */
-  z-index: 6; /* above tools-panel */
+  z-index: 1; /* keep under toolbar and dropdown menus */
   margin-bottom: -1px; /* overlap tools-panel top border by 1px */
 }
 
@@ -131,6 +131,7 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   cursor: pointer;
   opacity: 0.8;
   position: relative; /* for overflow clipping on active mask/borders */
+  z-index: 2; /* below toolbar which is 20, but above tabs container */
 }
 
 .tool-tab.active { opacity: 1; border-top: none; }
@@ -169,7 +170,8 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   border-radius: 0 0 8px 8px;
   min-height: 64px; /* constant height */
   position: relative;
-  z-index: 5; /* below tool-tabs */
+  z-index: 20; /* above tabs container */
+  overflow: visible; /* allow dropdown menus to escape */
   /* subtle inner shadow to de-emphasize the seam; avoids 1px artifacts */
   box-shadow: inset 0 1px 0 0 #0b1220;
 }
@@ -269,40 +271,189 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   padding-bottom: 8px;
 }
 
-.toolbar button, .toolbar select, .toolbar input[type="color"] {
+/* Universal toolbar button styling */
+.toolbar .tool {
   background: #0b1220;
   color: var(--text);
-  border: 1px solid #1f2937;
-  border-radius: 6px;
-  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+}
+
+.toolbar .tool:hover {
+  background: #111a2c;
+}
+
+.toolbar .tool.active {
+  background: #13213a;
+}
+
+.toolbar .tool.active svg {
+  color: var(--accent);
+}
+
+.toolbar .tool.disabled, 
+.toolbar .tool:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #0b1220;
+}
+
+.toolbar .tool.disabled:hover, 
+.toolbar .tool:disabled:hover {
+  background: #0b1220;
+}
+
+/* Universal toolbar group and separator styling */
+.toolbar .tool-group {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.toolbar .tool-sep {
+  width: 1px;
+  height: 32px;
+  background: #334155;
+  margin: 0 8px;
+  align-self: center;
+}
+
+/* Universal toolbar icon sizing */
+.toolbar .tool svg {
+  width: 20px;
+  height: 20px;
+}
+
+.toolbar button, .toolbar select, .toolbar input[type="color"] {
+  background: #0b1220;
+  color: var(--text);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.toolbar button:hover, .toolbar select:hover, .toolbar input[type="color"]:hover {
+  background: #111a2c;
+}
+
+.toolbar button:active, .toolbar select:active, .toolbar input[type="color"]:active {
+  background: #13213a;
 }
 
 .text-toolbar .tool {
   background: #0b1220;
   color: var(--text);
-  border: 1px solid #334155;
+  border: none;
   border-radius: 8px;
   padding: 8px 12px; /* slightly larger clickable area */
 }
-.text-toolbar .tool:hover { border-color: var(--accent); }
-.text-toolbar .tool.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.2);
+.text-toolbar .tool:hover { background: #111a2c; }
+.text-toolbar .tool.active { background: #13213a; }
+.text-toolbar .tool.active svg { color: var(--accent); }
+.text-toolbar .tool.disabled, .text-toolbar .tool:disabled { 
+  opacity: 0.5; 
+  cursor: not-allowed; 
+  background: #0b1220;
+}
+.text-toolbar .tool.disabled:hover, .text-toolbar .tool:disabled:hover { 
+  background: #0b1220; 
 }
 
-/* Make icons bigger */
-.text-toolbar .tool svg { width: 20px; height: 20px; }
-
-/* Compact font/size selects */
-.text-toolbar .font-select, .text-toolbar .size-select {
-  padding: 6px 8px;
+/* Formula toolbar layout */
+.formula-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
 }
 
-.text-toolbar .align-select, .text-toolbar .heading-select {
-  padding: 6px 8px;
+/* Formula toolbar styles - same as text toolbar */
+.formula-toolbar .tool {
+  background: #0b1220;
+  color: var(--text);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+.formula-toolbar .tool:hover { background: #111a2c; }
+.formula-toolbar .tool.active { background: #13213a; }
+.formula-toolbar .tool.active svg { color: var(--accent); }
+.formula-toolbar .tool.disabled, .formula-toolbar .tool:disabled { 
+  opacity: 0.5; 
+  cursor: not-allowed; 
+  background: #0b1220;
+}
+.formula-toolbar .tool.disabled:hover, .formula-toolbar .tool:disabled:hover { 
+  background: #0b1220; 
+}
+
+/* Formula toolbar group separators */
+.formula-toolbar .tool-group {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.formula-toolbar .tool-sep {
+  width: 1px;
+  height: 32px;
+  background: #334155;
+  margin: 0 8px;
+  align-self: center;
+}
+
+/* LaTeX editing notification */
+.latex-editing-notification {
+  text-align: center;
+  font-size: 12px;
+  color: #007acc;
+  padding: 4px 8px;
+  background-color: #e6f3ff;
+  border-radius: 4px;
+  border: 1px solid #007acc;
+}
+
+/* Make icons bigger - consistent across all toolbars */
+.text-toolbar .tool svg, 
+.formula-toolbar .tool svg, 
+.graphs-wrapper .tool svg { 
+  width: 20px; 
+  height: 20px; 
+}
+
+/* Text toolbar layout */
+.text-toolbar {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* Group separators */
+.text-toolbar .tool-group {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.text-toolbar .tool-sep {
+  width: 1px;
+  height: 32px;
+  background: #334155;
+  margin: 0 8px;
+  align-self: center;
 }
 
 /* Icon dropdown menu styling */
@@ -317,30 +468,248 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   gap: 6px;
 }
 .icon-dropdown-menu.open { display: grid; }
-.text-toolbar .align-select, .text-toolbar .heading-select { position: relative; }
-.text-toolbar .align-select .icon-dropdown-menu, .text-toolbar .heading-select .icon-dropdown-menu { left: 0; top: 100%; z-index: 20; }
 
 
 /* Color swatches presentation */
-.text-toolbar .color-swatch {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border-radius: 8px;
-}
+.text-toolbar .color-btn { display: inline-flex; gap: 8px; align-items: center; }
+.text-toolbar .color-btn .color-indicator { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #334155; }
 
 /* Editor content theming */
-.ProseMirror table { border-collapse: collapse; width: 100%; }
-.ProseMirror th, .ProseMirror td { border: 1px solid #cbd5e1; padding: 6px 8px; }
-.ProseMirror th { background: #0b1220; color: var(--text); }
+.ProseMirror table { 
+  border-collapse: collapse; 
+  width: 100%; 
+  min-width: 500px; /* Minimum width for better centering */
+  margin: 0 auto; /* Center the table */
+  position: relative; 
+  table-layout: fixed;
+  cursor: text; 
+  box-sizing: border-box; 
+}
+.ProseMirror th, .ProseMirror td {
+  border: 1px solid #cbd5e1;
+  padding: 6px 8px;
+  position: relative;
+  vertical-align: top;
+  word-break: break-word;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+  cursor: text; /* Default text cursor for cell content */
+  min-width: 50px;
+}
+.ProseMirror th {
+  background: #f1f5f9; /* slightly darker than row background */
+  color: #111827;
+}
 
-.ProseMirror pre { background: #0b1220; color: var(--text); padding: 10px 12px; border-radius: 8px; border: 1px solid #1f2937; overflow: auto; }
-.ProseMirror code { background: transparent; }
+/* Visible selection when selecting table as text */
+.ProseMirror ::selection { background: rgba(34, 211, 238, 0.25); }
+.ProseMirror *::selection { background: rgba(34, 211, 238, 0.25); }
+
+/* Table selection (tiptap column/row selections) */
+.ProseMirror .selectedCell { background-color: rgba(34, 211, 238, 0.12); }
+
+/* Removed old column-resize-handle style - using enhanced version below */
+.resize-cursor { cursor: col-resize !important; }
+
+/* Ensure consistent column behavior */
+.ProseMirror table colgroup col {
+  min-width: 50px;
+  /* Remove max-width constraint to allow natural column distribution */
+}
+
+/* Clean and simple column resize handle */
+.ProseMirror .column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  background: transparent;
+  cursor: col-resize !important;
+  z-index: 10;
+}
+
+.ProseMirror .column-resize-handle:hover {
+  background: rgba(59, 130, 246, 0.5);
+  border-right: 2px solid #3b82f6;
+}
+
+/* Standard table resizing with basic visual feedback */
+
+/* Simple width constraint */
+.ProseMirror .tableWrapper {
+  min-width: 500px; /* Minimum width for better centering */
+  margin: 0 auto; /* Center the table wrapper */
+  width: 100%;
+}
+
+/* Row resize handle (visual only); use CSS cursor and hit area */
+/* Remove row-resize affordance */
+
+/* Zoom disabled per requirements */
+
+/* Collapsed state - handled by CustomTableView but keeping as fallback */
+.ProseMirror .tableWrapper[data-collapsed="true"] {
+  display: block !important;
+  border: 1px dashed #64748b !important;
+  background: #0b1220 !important;
+  color: var(--text) !important;
+  padding: 6px !important;
+  width: auto !important;
+  max-width: 100% !important;
+  min-width: auto !important;
+}
+
+.ProseMirror .tableWrapper[data-collapsed="true"] table {
+  display: none !important;
+}
+
+/* Fallback for direct table collapse (when not using tableWrapper) */
+.ProseMirror table[data-collapsed="true"] {
+  display: block !important;
+  border: 1px dashed #64748b !important;
+  background: #0b1220 !important;
+  color: var(--text) !important;
+  padding: 6px !important;
+  width: auto !important;
+  max-width: 100% !important;
+}
+
+.ProseMirror table[data-collapsed="true"] tbody,
+.ProseMirror table[data-collapsed="true"] thead,
+.ProseMirror table[data-collapsed="true"] tr,
+.ProseMirror table[data-collapsed="true"] th,
+.ProseMirror table[data-collapsed="true"] td,
+.ProseMirror table[data-collapsed="true"] colgroup { 
+  display: none !important; 
+}
+
+.ProseMirror table[data-collapsed="true"]::after {
+  content: 'Таблица скрыта';
+  font-size: 12px;
+  color: #94a3b8;
+  display: inline-block;
+}
+
+.ProseMirror pre { background: #0b1220; color: var(--text); padding: 10px 12px; border-radius: 8px; border: 1px solid #1f2937; overflow: auto; font-family: "Fira Code", "Cascadia Code", "SFMono-Regular", Menlo, Consolas, monospace; font-size: 0.95em; }
+.ProseMirror code { background: #0b1220; color: var(--text); border: 1px solid #1f2937; border-radius: 6px; padding: 2px 4px; font-family: "Fira Code", "Cascadia Code", "SFMono-Regular", Menlo, Consolas, monospace; }
+.ProseMirror pre code { border: none; background: transparent; padding: 0; }
 
 .color-sample { width: 22px; height: 22px; border-radius: 6px; border: 1px solid #334155; display: inline-block; vertical-align: middle; margin-right: 6px; }
 .dropdown { position: relative; }
-.dropdown-menu { position: absolute; top: 100%; left: 0; background: #0b1220; border: 1px solid #1f2937; border-radius: 8px; padding: 6px; display: grid; gap: 6px; z-index: 10; }
-.dropdown-menu button { white-space: nowrap; }
+.dropdown-menu { position: absolute; top: 100%; left: 0; background: #0b1220; border: 1px solid #1f2937; border-radius: 8px; padding: 6px; display: grid; gap: 6px; z-index: 100; }
+.dropdown .tool { max-width: 100%; }
+.dropdown .dropdown-label { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dropdown-menu button { 
+  white-space: nowrap; 
+  background: #0b1220;
+  color: var(--text);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.dropdown-menu button:hover { 
+  background: #111a2c; 
+}
+
+/* Grid dropdown button */
+.grid-dropdown-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.grid-dropdown-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Grid dropdown menu */
+.grid-dropdown-menu {
+  padding: 12px !important;
+  width: auto !important;
+  max-width: 480px !important;
+  min-width: 360px !important;
+  display: grid !important;
+  gap: 4px !important;
+}
+
+/* Grid dropdown items */
+.grid-dropdown-item {
+  white-space: normal !important;
+  text-align: center !important;
+  justify-content: center;
+  padding: 8px 4px;
+  font-size: 14px;
+  min-height: 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.grid-dropdown-item:hover {
+  background: #111a2c !important;
+}
+
+.grid-dropdown-key {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.grid-dropdown-symbol {
+  font-family: serif;
+  font-size: 18px;
+}
+
+/* Graphs toolbar styles - consistent with other toolbars */
+.graphs-wrapper .tool {
+  background: #0b1220;
+  color: var(--text);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.graphs-wrapper .tool:hover { background: #111a2c; }
+.graphs-wrapper .tool.active { background: #13213a; }
+.graphs-wrapper .tool.active svg { color: var(--accent); }
+.graphs-wrapper .tool.disabled, .graphs-wrapper .tool:disabled { 
+  opacity: 0.5; 
+  cursor: not-allowed; 
+  background: #0b1220;
+}
+.graphs-wrapper .tool.disabled:hover, .graphs-wrapper .tool:disabled:hover { 
+  background: #0b1220; 
+}
+
+/* Graphs toolbar group separators */
+.graphs-wrapper .tool-group {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.graphs-wrapper .tool-sep {
+  width: 1px;
+  height: 32px;
+  background: #334155;
+  margin: 0 8px;
+  align-self: center;
+}
+
+/* Toolbar wrappers */
+.formula-wrapper,
+.graphs-wrapper {
+  justify-content: center;
+}
 
 .a4-canvas {
   margin: 0 auto;
@@ -350,7 +719,11 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   color: black;
   padding: 32px;
   border-radius: 8px;
+  overflow-x: hidden; /* prevent content (e.g., wide tables) from exceeding page width */
 }
+
+/* Ensure editor content never creates horizontal scroll inside the A4 sheet */
+.a4-canvas .ProseMirror { width: 100%; max-width: 100%; overflow-x: hidden; box-sizing: border-box; }
 
 .section-title {
   color: var(--muted);
@@ -374,11 +747,120 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   border-radius: 6px;
 }
 
+/* Mathematics extension styles */
+.tiptap .tiptap-mathematics-render {
+  padding: 0 0.25rem;
+  border-radius: 0.25rem;
+}
+
+.tiptap .tiptap-mathematics-render--editable {
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.tiptap .tiptap-mathematics-render--editable:hover {
+  background: #eee;
+}
+
+.tiptap .tiptap-mathematics-render[data-type='inline-math'] {
+  display: inline-block;
+}
+
+.tiptap .tiptap-mathematics-render[data-type='block-math'] {
+  display: block;
+  margin: 1rem 0;
+  padding: 1rem;
+  text-align: center;
+}
+
+.tiptap .inline-math-error,
+.tiptap .block-math-error {
+  background: #ffe0e0;
+  color: #cc0000;
+  border: 1px solid #cc0000;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+}
+
+/* Clean math formula styling - let KaTeX handle the display */
+.ProseMirror .katex {
+  color: inherit;
+}
+
+.ProseMirror .katex-display {
+  margin: 1em 0;
+  text-align: center;
+}
+
+/* Selection styling for math nodes */
+.ProseMirror .math-node.ProseMirror-selectednode {
+  background: rgba(34, 211, 238, 0.2);
+  border-radius: 4px;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* KaTeX styles integration */
+.katex { font-size: 1.1em; }
+.katex-display { margin: 1em 0; }
+
+/* Legacy formula styling for backward compatibility */
+.formula {
+  display: inline;
+  margin: 0 2px;
+  padding: 2px 4px;
+  background: rgba(34, 211, 238, 0.1);
+  border-radius: 4px;
+  border: 1px solid rgba(34, 211, 238, 0.2);
+  cursor: pointer;
+}
+
+/* LaTeX editing mode visual hints */
+.ProseMirror .math-editing-node {
+  /* Make dollar signs more visible during editing */
+  font-family: monospace;
+}
+
+.ProseMirror code {
+  background: #fff3cd;
+  border: 1px solid #ffecb5;
+  color: #856404;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: 'Courier New', Monaco, monospace;
+}
+
 @media print {
   body { background: white; }
   .app-shell { display: block; }
   .sidebar, .topbar, .tabs, .toolbar { display: none !important; }
   .a4-canvas { width: auto; min-height: auto; box-shadow: none; }
+  
+  /* Print-friendly formula styling */
+  .math-inline, .math-display, .formula {
+    background: transparent !important;
+    border: none !important;
+    outline: none !important;
+  }
+}
+
+/* Graph selection styles */
+.graph-node {
+  transition: all 0.2s ease;
+}
+
+.graph-node.selected {
+  border-color: #007acc !important;
+  box-shadow: 0 0 0 2px rgba(0, 122, 204, 0.2);
+}
+
+.graph-display:hover {
+  background-color: rgba(0, 122, 204, 0.05);
+}
+
+.tool.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 

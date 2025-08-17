@@ -27,7 +27,9 @@
     },
     "asar": true,
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "fileAssociations": [
         {
           "ext": "rsrch",
@@ -38,7 +40,9 @@
       ]
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "fileAssociations": [
         {
           "ext": "rsrch",
@@ -48,7 +52,9 @@
       ]
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Office",
       "fileAssociations": [
         {
@@ -60,28 +66,39 @@
     }
   },
   "dependencies": {
+    "@tiptap/core": "^3.1.0",
+    "@tiptap/extension-code-block": "^3.1.0",
+    "@tiptap/extension-collaboration": "^3.1.0",
+    "@tiptap/extension-color": "^3.1.0",
+    "@tiptap/extension-drag-handle": "^3.1.0",
+    "@tiptap/extension-drag-handle-react": "^3.1.0",
+    "@tiptap/extension-font-family": "^3.1.0",
+    "@tiptap/extension-highlight": "^3.1.0",
+    "@tiptap/extension-image": "^3.1.0",
+    "@tiptap/extension-mathematics": "^3.1.0",
+    "@tiptap/extension-node-range": "^3.1.0",
+    "@tiptap/extension-subscript": "^3.1.0",
+    "@tiptap/extension-superscript": "^3.1.0",
+    "@tiptap/extension-table": "^3.1.0",
+    "@tiptap/extension-table-cell": "^3.1.0",
+    "@tiptap/extension-table-header": "^3.1.0",
+    "@tiptap/extension-table-row": "^3.1.0",
+    "@tiptap/extension-text-align": "^3.1.0",
+    "@tiptap/extension-text-style": "^3.1.0",
+    "@tiptap/extension-underline": "^3.1.0",
+    "@tiptap/pm": "^3.1.0",
+    "@tiptap/react": "^3.1.0",
+    "@tiptap/starter-kit": "^3.1.0",
+    "@types/plotly.js": "^3.0.3",
     "classnames": "^2.5.1",
     "katex": "^0.16.10",
+    "plotly.js": "^3.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.2.1",
     "react-katex": "^3.1.0",
-    "recharts": "^2.12.7",
-    "@tiptap/react": "^2.3.2",
-    "@tiptap/starter-kit": "^2.3.2",
-    "@tiptap/extension-text-align": "^2.3.2",
-    "@tiptap/extension-color": "^2.3.2",
-    "@tiptap/extension-text-style": "^2.3.2",
-    "@tiptap/extension-highlight": "^2.3.2",
-    "@tiptap/extension-underline": "^2.3.2",
-    "@tiptap/extension-font-family": "^2.3.2",
-    "@tiptap/extension-code-block": "^2.3.2",
-    "@tiptap/extension-image": "^2.3.2",
-    "@tiptap/extension-mathematics": "^2.3.2",
-    "@tiptap/extension-table": "^2.3.2",
-    "@tiptap/extension-table-cell": "^2.3.2",
-    "@tiptap/extension-table-row": "^2.3.2",
-    "@tiptap/extension-table-header": "^2.3.2"
+    "react-plotly.js": "^2.6.0",
+    "recharts": "^2.12.7"
   },
   "devDependencies": {
     "@types/node": "^20.14.9",
@@ -89,14 +106,12 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3",
     "electron": "^30.0.8",
     "electron-builder": "^24.13.3",
-    "cross-env": "^7.0.3",
     "rimraf": "^6.0.1",
     "typescript": "^5.5.4",
     "vite": "^5.4.1",
     "wait-on": "^7.2.0"
   }
 }
-
-
