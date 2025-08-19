@@ -16,14 +16,14 @@ const PlotlyPlaceholder: React.FC<{ data: any; layout: any; config: any }> = ({ 
       backgroundColor: '#f9f9f9',
       borderRadius: '4px',
       fontSize: '14px',
-      color: '#666'
+      color: '#333'
     }}>
       <div style={{ textAlign: 'center' }}>
         <div>📊 Plotly Graph</div>
         <div style={{ fontSize: '12px', marginTop: '4px' }}>
           {data?.[0]?.type || 'scatter'} chart with {data?.[0]?.x?.length || 0} points
         </div>
-        <div style={{ fontSize: '10px', marginTop: '4px', color: '#999' }}>
+        <div style={{ fontSize: '10px', marginTop: '4px', color: '#555' }}>
           Install plotly.js and react-plotly.js to see actual graph
         </div>
       </div>

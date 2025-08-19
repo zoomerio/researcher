@@ -723,7 +723,7 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
 }
 
 /* Ensure editor content never creates horizontal scroll inside the A4 sheet */
-.a4-canvas .ProseMirror { width: 100%; max-width: 100%; overflow-x: hidden; box-sizing: border-box; }
+.a4-canvas .ProseMirror { width: 100%; max-width: 100%; box-sizing: border-box; }
 
 .section-title {
   color: var(--muted);
@@ -780,6 +780,42 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   border: 1px solid #cc0000;
   padding: 0.5rem;
   border-radius: 0.25rem;
+}
+
+/* Math editing node styles */
+.tiptap .math-editing-node.block-math-editing {
+  display: block !important;
+  width: 100%;
+  margin: 1rem 0;
+  padding: 1rem;
+  text-align: center;
+  border: 2px solid #007acc;
+  border-radius: 4px;
+  background-color: #e6f3ff;
+  box-sizing: border-box;
+}
+
+.tiptap .math-editing-node.inline-math-editing {
+  display: inline-block !important;
+  padding: 2px 4px;
+  margin: 0 2px;
+  border: 2px solid #007acc;
+  border-radius: 4px;
+  background-color: #e6f3ff;
+}
+
+/* Ensure block math editing doesn't create unwanted paragraphs */
+.tiptap .block-math-editing-wrapper {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Prevent paragraph wrapping around block math editing nodes */
+.tiptap p .math-editing-node.block-math-editing {
+  display: block;
+  margin: 1rem -1rem; /* Negative margin to break out of paragraph */
 }
 
 /* Clean math formula styling - let KaTeX handle the display */
@@ -861,6 +897,427 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
 .tool.disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Illustration Node Styles - optimized for performance */
+.illustration-node {
+  margin: 16px 0;
+}
+
+.illustration-node img {
+  transition: box-shadow 0.2s ease;
+  will-change: auto;
+  image-rendering: auto;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+
+.illustration-node:hover img {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.illustration-node .selected {
+  border-color: #007acc !important;
+  box-shadow: 0 0 0 2px rgba(0, 122, 204, 0.2);
+}
+
+/* Performance optimizations for multiple images */
+.illustration-node {
+  transform: translateZ(0); /* Force GPU acceleration */
+  backface-visibility: hidden;
+}
+
+.illustration-node img {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* Drawing Canvas Modal Styles */
+.drawing-canvas-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.8);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.drawing-canvas-container {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.drawing-tools {
+  margin-bottom: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.drawing-tool-button {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+
+.drawing-tool-button.active {
+  background-color: #007acc;
+  color: white;
+}
+
+.drawing-tool-button:not(.active) {
+  background-color: #f0f0f0;
+  color: black;
+}
+
+.drawing-tool-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Enhanced Modal Styles for Image Editing Tools */
+.image-edit-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.8);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-edit-modal-container {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  max-width: 95vw;
+  max-height: 95vh;
+  overflow: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  position: relative;
+}
+
+.measurement-canvas-area {
+  position: relative;
+  border: 2px solid #ddd;
+  border-radius: 4px;
+  overflow: hidden;
+  background-color: #f9f9f9;
+  margin: 0 auto;
+}
+
+.measurement-canvas-area img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  object-fit: contain;
+}
+
+.drawing-canvas-area canvas {
+  border: 1px solid #ccc;
+  display: block;
+  max-width: 100%;
+}
+
+/* Legacy styles for backward compatibility */
+.measurement-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: auto;
+}
+
+.measurement-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 12px;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 200px;
+  backdrop-filter: blur(10px);
+}
+
+.measurement-control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.measurement-control-row label {
+  font-weight: 500;
+  color: #333;
+}
+
+.measurement-control-row input,
+.measurement-control-row select {
+  padding: 4px 6px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.measurement-list {
+  font-size: 12px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.measurement-list-header {
+  font-weight: bold;
+  margin-bottom: 4px;
+  color: #333;
+}
+
+.measurement-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.measurement-item:last-child {
+  border-bottom: none;
+}
+
+.measurement-delete-btn {
+  background: none;
+  border: none;
+  color: #ff4444;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.measurement-delete-btn:hover {
+  background: #ffebee;
+}
+
+/* Image toolbar styles */
+.illustration-toolbar {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: rgba(0, 0, 0, 0.85);
+  border-radius: 6px;
+  padding: 6px;
+  display: flex;
+  gap: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+}
+
+.illustration-toolbar button {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  font-size: 14px;
+}
+
+.illustration-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+.illustration-toolbar button.active {
+  background: #007acc;
+}
+
+.illustration-toolbar button.delete:hover {
+  background: #ff4444;
+}
+
+/* Resize handle */
+.illustration-resize-handle {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 12px;
+  height: 12px;
+  background: #007acc;
+  cursor: se-resize;
+  border-radius: 2px;
+  opacity: 0.8;
+  transition: opacity 0.2s ease;
+}
+
+.illustration-resize-handle:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+/* Image alignment styles - handled in component now */
+.illustration-node {
+  position: relative;
+}
+
+/* Resize handles - optimized for performance */
+.resize-handle {
+  position: absolute;
+  background-color: #007acc;
+  border: 1px solid white;
+  opacity: 0.8;
+  transition: opacity 0.2s ease;
+  z-index: 10;
+  will-change: opacity;
+}
+
+.resize-handle:hover {
+  opacity: 1;
+}
+
+/* Corner handles for aspect ratio */
+.resize-handle-se {
+  bottom: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: se-resize;
+  border-radius: 2px;
+}
+
+.resize-handle-sw {
+  bottom: -4px;
+  left: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: sw-resize;
+  border-radius: 2px;
+}
+
+.resize-handle-ne {
+  top: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: ne-resize;
+  border-radius: 2px;
+}
+
+.resize-handle-nw {
+  top: -4px;
+  left: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: nw-resize;
+  border-radius: 2px;
+}
+
+/* Edge handles for width/height only */
+.resize-handle-e {
+  top: 50%;
+  right: -4px;
+  width: 8px;
+  height: 20px;
+  cursor: e-resize;
+  border-radius: 2px;
+  transform: translateY(-50%);
+}
+
+.resize-handle-w {
+  top: 50%;
+  left: -4px;
+  width: 8px;
+  height: 20px;
+  cursor: w-resize;
+  border-radius: 2px;
+  transform: translateY(-50%);
+}
+
+.resize-handle-n {
+  top: -4px;
+  left: 50%;
+  width: 20px;
+  height: 8px;
+  cursor: n-resize;
+  border-radius: 2px;
+  transform: translateX(-50%);
+}
+
+.resize-handle-s {
+  bottom: -4px;
+  left: 50%;
+  width: 20px;
+  height: 8px;
+  cursor: s-resize;
+  border-radius: 2px;
+  transform: translateX(-50%);
+}
+
+/* Caption styles */
+.illustration-caption {
+  font-size: 12px;
+  color: #333;
+  text-align: center;
+  margin-top: 6px;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+/* Images toolbar specific styles */
+.images-wrapper .tool-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.images-wrapper .tool {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.images-wrapper .tool:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.images-wrapper .tool:disabled:hover {
+  background: transparent;
+  transform: none;
 }
 
 

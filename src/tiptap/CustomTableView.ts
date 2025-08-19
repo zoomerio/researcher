@@ -140,7 +140,7 @@ export class CustomTableView implements NodeView {
         collapseText.className = 'collapse-text'
         collapseText.textContent = 'Таблица скрыта'
         collapseText.style.fontSize = '12px'
-        collapseText.style.color = '#94a3b8'
+        collapseText.style.color = '#555'
         this.dom.appendChild(collapseText)
       }
     } else {

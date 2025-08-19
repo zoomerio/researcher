@@ -1,4 +1,4 @@
-import React, { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import React, { ReactNode, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import TextAlign from '@tiptap/extension-text-align';
@@ -22,6 +22,7 @@ import FontSize from '../tiptap/FontSize';
 import BackgroundColor from '../tiptap/BackgroundColor';
 import { MathEditingNode } from '../tiptap/MathEditingNode';
 import { GraphNode } from '../tiptap/GraphNode';
+import { IllustrationNode } from '../tiptap/IllustrationNode';
 import {
   RiBold,
   RiItalic,
@@ -64,6 +65,9 @@ import {
   RiDeleteBack2Line,
   RiDeleteBin2Line,
   RiEditLine,
+  RiImageEditLine,
+  RiPaintBrushLine,
+  RiRulerLine,
 } from 'react-icons/ri';
 
 type DropdownItem = { key: string; label: string; icon?: ReactNode };
@@ -257,7 +261,7 @@ export const App: React.FC = () => {
     plan: '',
   });
 
-  const [activeTool, setActiveTool] = useState<'text' | 'tables' | 'formulas' | 'graphs' | null>('text');
+  const [activeTool, setActiveTool] = useState<'text' | 'tables' | 'formulas' | 'graphs' | 'images' | null>('text');
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [dropBefore, setDropBefore] = useState<boolean>(false);
@@ -294,6 +298,7 @@ export const App: React.FC = () => {
       Image,
       MathEditingNode,
       GraphNode,
+      IllustrationNode,
       Mathematics.configure({
         katexOptions: {
           throwOnError: false,
@@ -378,19 +383,20 @@ export const App: React.FC = () => {
               // Create a unique ID for this editing session
               const editingId = `math-editing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
               
-              // Replace the math node with our custom editing node
-              editor.chain()
-                .setNodeSelection(actualMathPos)
-                .deleteSelection()
-                .insertContent({
-                  type: 'mathEditingNode',
-                  attrs: {
-                    mathType: 'block',
-                    originalLatex: latex,
-                    editingId: editingId
-                  }
-                })
-                .run();
+              // Replace the math node with our custom editing node using direct transaction
+              const { state, dispatch } = editor.view;
+              const tr = state.tr;
+              
+              // Create the editing node
+              const editingNode = state.schema.nodes.blockMathEditingNode.create({
+                mathType: 'block',
+                originalLatex: latex,
+                editingId: editingId
+              });
+              
+              // Replace the node directly without affecting surrounding content
+              const newTr = tr.replaceWith(actualMathPos, actualMathPos + 1, editingNode);
+              dispatch(newTr);
               
               // Remove focus from the editor to prevent cursor conflicts
               setTimeout(() => {
@@ -577,19 +583,20 @@ export const App: React.FC = () => {
               // Create a unique ID for this editing session
               const editingId = `math-editing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
               
-              // Replace the math node with our custom editing node
-              editor.chain()
-                .setNodeSelection(actualMathPos)
-                .deleteSelection()
-                .insertContent({
-                  type: 'mathEditingNode',
-                  attrs: {
-                    mathType: 'inline',
-                    originalLatex: latex,
-                    editingId: editingId
-                  }
-                })
-                .run();
+              // Replace the math node with our custom editing node using direct transaction
+              const { state, dispatch } = editor.view;
+              const tr = state.tr;
+              
+              // Create the editing node
+              const editingNode = state.schema.nodes.inlineMathEditingNode.create({
+                mathType: 'inline',
+                originalLatex: latex,
+                editingId: editingId
+              });
+              
+              // Replace the node directly without affecting surrounding content
+              const newTr = tr.replaceWith(actualMathPos, actualMathPos + 1, editingNode);
+              dispatch(newTr);
               
               // Remove focus from the editor to prevent cursor conflicts
               setTimeout(() => {
@@ -877,17 +884,22 @@ export const App: React.FC = () => {
     return () => document.removeEventListener('graphSelected', handleGraphSelected)
   }, [])
 
-  // Global click handler to deselect graphs when clicking empty space - works from any tab
+  // Global click handler to deselect graphs and illustrations when clicking empty space
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement
-      // Check if click is on editor content but not on a graph
-      if (target.closest('.a4-canvas') && !target.closest('.graph-node')) {
+      // Check if click is on editor content but not on a graph or illustration
+      if (target.closest('.a4-canvas') && !target.closest('.graph-node') && !target.closest('.illustration-node')) {
         setSelectedGraph(null)
         // Remove selection styling from all graphs
         document.querySelectorAll('.graph-node').forEach(el => {
           el.classList.remove('selected')
         })
+        
+        // Deselect illustrations
+        document.dispatchEvent(new CustomEvent('illustrationSelected', { 
+          detail: null
+        }))
       }
     }
 
@@ -1658,6 +1670,12 @@ export const App: React.FC = () => {
                   <GraphsBar editor={editor} selectedGraph={selectedGraph} setSelectedGraph={setSelectedGraph} />
                 </div>
               )}
+
+              {activeTool === 'images' && (
+                <div className="toolbar images-wrapper">
+                  <ImagesBar editor={editor} activeTool={activeTool} />
+                </div>
+              )}
                 </div>
                 )}
                 <div className="tool-tabs">
@@ -1665,6 +1683,7 @@ export const App: React.FC = () => {
                   <button className={`tool-tab ${activeTool === 'tables' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'tables' ? null : 'tables')}>Tables</button>
                   <button className={`tool-tab ${activeTool === 'formulas' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'formulas' ? null : 'formulas')}>Formulas</button>
                   <button className={`tool-tab ${activeTool === 'graphs' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'graphs' ? null : 'graphs')}>Graphs</button>
+                  <button className={`tool-tab ${activeTool === 'images' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'images' ? null : 'images')}>Images</button>
                 </div>
               </div>
               <DragHandleReact editor={editor}>
@@ -2092,6 +2111,288 @@ const FormulaBar: React.FC<{
     </div>
   );
 };
+
+const ImagesBar: React.FC<{ editor: any; activeTool: string }> = ({ editor, activeTool }) => {
+  const [selectedIllustration, setSelectedIllustration] = useState<any>(null)
+  const [, setForceUpdate] = useState({})
+
+  // Force re-render to update UI
+  const triggerUpdate = useCallback(() => {
+    setForceUpdate({})
+  }, [])
+
+  // Listen for illustration selection events
+  useEffect(() => {
+    const handleIllustrationSelected = (event: any) => {
+      setSelectedIllustration(event.detail)
+      triggerUpdate()
+    }
+
+    document.addEventListener('illustrationSelected', handleIllustrationSelected)
+    return () => document.removeEventListener('illustrationSelected', handleIllustrationSelected)
+  }, [triggerUpdate])
+
+  // Sync selection state when Images tab becomes active
+  useEffect(() => {
+    if (activeTool === 'images' && !selectedIllustration) {
+      // Use a small delay to ensure the DOM is ready
+      const timeoutId = setTimeout(() => {
+        // Look for illustrations with the blue border (indicating selection)
+        const illustrations = document.querySelectorAll('.illustration-node > div')
+        for (const illustration of illustrations) {
+          const computedStyle = window.getComputedStyle(illustration)
+          // Check if it has the blue border indicating selection
+          if (computedStyle.borderColor === 'rgb(0, 122, 204)' || computedStyle.borderColor === '#007acc') {
+            // Found a selected illustration - dispatch custom event to sync state without re-selecting
+            const event = new CustomEvent('syncIllustrationSelection', {
+              detail: { element: illustration }
+            })
+            document.dispatchEvent(event)
+            break
+          }
+        }
+      }, 150)
+      
+      return () => clearTimeout(timeoutId)
+    }
+  }, [activeTool, selectedIllustration])
+
+  // Image compression utility
+  const compressImage = (dataUrl: string, maxWidth = 1920, maxHeight = 1080, quality = 0.85): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = document.createElement('img')
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          resolve(dataUrl)
+          return
+        }
+
+        // Calculate new dimensions
+        let { width, height } = img
+        if (width > maxWidth || height > maxHeight) {
+          const ratio = Math.min(maxWidth / width, maxHeight / height)
+          width *= ratio
+          height *= ratio
+        }
+
+        canvas.width = width
+        canvas.height = height
+        ctx.drawImage(img, 0, 0, width, height)
+
+        // Use JPEG for better compression, PNG if transparency is needed
+        const format = dataUrl.includes('data:image/png') ? 'image/png' : 'image/jpeg'
+        const compressed = canvas.toDataURL(format, format === 'image/jpeg' ? quality : undefined)
+        
+        resolve(compressed.length < dataUrl.length ? compressed : dataUrl)
+      }
+      img.src = dataUrl
+    })
+  }
+
+  async function insertImage() {
+    try {
+      const result = await window.api.pickImage()
+      if (!result?.canceled && (result as any).dataUrl) {
+        // Get image dimensions to calculate optimal size
+        const img = document.createElement('img')
+        img.onload = async () => {
+          const naturalWidth = img.naturalWidth
+          const naturalHeight = img.naturalHeight
+          
+          // Calculate maximum size that fits the page (assume max page width ~800px)
+          const maxPageWidth = 800
+          const maxPageHeight = 600
+          
+          let insertWidth = naturalWidth
+          let insertHeight = naturalHeight
+          
+          // Scale down if image is too large, maintaining aspect ratio
+          if (naturalWidth > maxPageWidth || naturalHeight > maxPageHeight) {
+            const widthRatio = maxPageWidth / naturalWidth
+            const heightRatio = maxPageHeight / naturalHeight
+            const ratio = Math.min(widthRatio, heightRatio)
+            
+            insertWidth = Math.round(naturalWidth * ratio)
+            insertHeight = Math.round(naturalHeight * ratio)
+          }
+          
+          // Compress image before inserting
+          const compressedDataUrl = await compressImage((result as any).dataUrl)
+          
+          editor?.chain().focus().insertIllustration({ 
+            src: compressedDataUrl,
+            width: insertWidth,
+            height: insertHeight,
+            alignment: 'left',
+            textWrap: 'none' // No text wrapping by default
+          }).run()
+        }
+        img.src = (result as any).dataUrl
+      }
+    } catch (error) {
+      console.error('Error inserting image:', error)
+    }
+  }
+
+  function createDrawing() {
+    // Create a smaller blank canvas for drawing (can be resized later)
+    const canvas = document.createElement('canvas')
+    canvas.width = 600
+    canvas.height = 400
+    const ctx = canvas.getContext('2d')
+    if (ctx) {
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, 600, 400)
+      // Use JPEG for smaller file size since it's a solid white background
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
+      
+      editor?.chain().focus().insertIllustration({ 
+        src: dataUrl,
+        width: 600,
+        height: 400,
+        alignment: 'left',
+        textWrap: 'none' // No text wrapping by default
+      }).run()
+    }
+  }
+
+  function updateAlignment(alignment: string) {
+    if (selectedIllustration && selectedIllustration.updateAttributes) {
+      selectedIllustration.updateAttributes({ alignment })
+      // Update local state to reflect changes immediately
+      setSelectedIllustration((prev: any) => prev ? {
+        ...prev,
+        node: { ...prev.node, attrs: { ...prev.node.attrs, alignment } }
+      } : null)
+      triggerUpdate()
+    }
+  }
+
+  function updateTextWrap(textWrap: string) {
+    if (selectedIllustration && selectedIllustration.updateAttributes) {
+      selectedIllustration.updateAttributes({ textWrap })
+      // Update local state to reflect changes immediately
+      setSelectedIllustration((prev: any) => prev ? {
+        ...prev,
+        node: { ...prev.node, attrs: { ...prev.node.attrs, textWrap } }
+      } : null)
+      triggerUpdate()
+    }
+  }
+
+  function updateCaption() {
+    if (selectedIllustration && selectedIllustration.startCaptionEdit) {
+      selectedIllustration.startCaptionEdit()
+    }
+  }
+
+  return (
+    <>
+      {/* Group: Insert images */}
+      <div className="tool-group">
+        <button
+          className="tool"
+          onClick={insertImage}
+          title="Вставить изображение"
+        >
+          <RiImageLine /> Изображение
+        </button>
+        <button
+          className="tool"
+          onClick={createDrawing}
+          title="Создать рисунок"
+        >
+          <RiImageEditLine /> Рисунок
+        </button>
+      </div>
+      <div className="tool-sep" aria-hidden="true" />
+
+      {/* Group: Alignment */}
+      <div className="tool-group">
+        <button
+          className={`tool ${selectedIllustration?.node?.attrs?.alignment === 'left' ? 'active' : ''}`}
+          onClick={() => updateAlignment('left')}
+          disabled={!selectedIllustration}
+          title="Выровнять по левому краю"
+        >
+          <RiAlignLeft />
+        </button>
+        <button
+          className={`tool ${selectedIllustration?.node?.attrs?.alignment === 'center' ? 'active' : ''}`}
+          onClick={() => updateAlignment('center')}
+          disabled={!selectedIllustration}
+          title="Выровнять по центру"
+        >
+          <RiAlignCenter />
+        </button>
+        <button
+          className={`tool ${selectedIllustration?.node?.attrs?.alignment === 'right' ? 'active' : ''}`}
+          onClick={() => updateAlignment('right')}
+          disabled={!selectedIllustration}
+          title="Выровнять по правому краю"
+        >
+          <RiAlignRight />
+        </button>
+      </div>
+      <div className="tool-sep" aria-hidden="true" />
+
+      {/* Group: Text wrapping */}
+      <div className="tool-group">
+        <Dropdown
+          label={selectedIllustration?.node?.attrs?.textWrap === 'none' ? 'Без обтекания' : 'С обтеканием'}
+          icon={null}
+          items={[
+            { key: 'wrap', label: 'С обтеканием текстом' },
+            { key: 'none', label: 'Без обтекания' },
+          ]}
+          selectedKey={selectedIllustration?.node?.attrs?.textWrap || 'wrap'}
+          onSelect={(key) => updateTextWrap(key)}
+          active={!!selectedIllustration}
+        />
+      </div>
+      <div className="tool-sep" aria-hidden="true" />
+
+      {/* Group: Image operations */}
+      <div className="tool-group">
+        <button
+          className={`tool ${!selectedIllustration ? 'disabled' : ''}`}
+          onClick={updateCaption}
+          disabled={!selectedIllustration}
+          title="Добавить/изменить подпись"
+        >
+          <RiEditLine /> Подпись
+        </button>
+        <button
+          className={`tool ${!selectedIllustration ? 'disabled' : ''}`}
+          onClick={() => selectedIllustration?.startDrawing?.()}
+          disabled={!selectedIllustration}
+          title="Рисовать на изображении"
+        >
+          <RiPaintBrushLine /> Рисовать
+        </button>
+        <button
+          className={`tool ${!selectedIllustration ? 'disabled' : ''}`}
+          onClick={() => selectedIllustration?.startMeasurement?.()}
+          disabled={!selectedIllustration}
+          title="Измерить объекты"
+        >
+          <RiRulerLine /> Измерить
+        </button>
+        <button
+          className={`tool ${!selectedIllustration ? 'disabled' : ''}`}
+          onClick={() => selectedIllustration?.deleteNode?.()}
+          disabled={!selectedIllustration}
+          title="Удалить изображение"
+          style={{ color: '#dc3545' }}
+        >
+          <RiDeleteBinLine /> Удалить
+        </button>
+      </div>
+    </>
+  )
+}
 
 const GraphsBar: React.FC<{ editor: any; selectedGraph: any; setSelectedGraph: (graph: any) => void }> = ({ editor, selectedGraph, setSelectedGraph }) => {
 

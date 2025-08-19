@@ -97,7 +97,7 @@ const MathEditingNodeView = ({ node, updateAttributes, deleteNode, getPos, edito
     
     let editingNodePos: number | null = null;
     state.doc.descendants((node: any, pos: number) => {
-      if (node.type.name === 'mathEditingNode' && 
+      if ((node.type.name === 'inlineMathEditingNode' || node.type.name === 'blockMathEditingNode') && 
           node.attrs.editingId === editingId) {
         editingNodePos = pos;
         console.log(`[${editingId}] Found editing node at position: ${pos}`);
@@ -147,6 +147,7 @@ const MathEditingNodeView = ({ node, updateAttributes, deleteNode, getPos, edito
 
   return (
     <NodeViewWrapper
+      as={mathType === 'block' ? 'div' : 'span'}
       className={`math-editing-node ${mathType === 'block' ? 'block-math-editing' : 'inline-math-editing'}`}
       data-math-editing={editingId}
       data-math-type={mathType}
@@ -158,7 +159,9 @@ const MathEditingNodeView = ({ node, updateAttributes, deleteNode, getPos, edito
         textAlign: mathType === 'block' ? 'center' : 'left',
         border: '2px solid #007acc',
         borderRadius: '4px',
-        backgroundColor: '#e6f3ff'
+        backgroundColor: '#e6f3ff',
+        width: mathType === 'block' ? '100%' : 'auto',
+        boxSizing: 'border-box'
       }}
     >
       {isEditing ? (
@@ -188,9 +191,9 @@ const MathEditingNodeView = ({ node, updateAttributes, deleteNode, getPos, edito
   )
 }
 
-// Define the TipTap node
-export const MathEditingNode = Node.create({
-  name: 'mathEditingNode',
+// Define the inline math editing node
+export const InlineMathEditingNode = Node.create({
+  name: 'inlineMathEditingNode',
 
   group: 'inline',
 
@@ -218,12 +221,12 @@ export const MathEditingNode = Node.create({
   parseHTML() {
     return [
       {
-        tag: 'span[data-math-editing]',
+        tag: 'span[data-math-editing][data-math-type="inline"]',
         getAttrs: (element) => {
           if (typeof element === 'string') return false
           
           return {
-            mathType: element.getAttribute('data-math-type') || 'inline',
+            mathType: 'inline',
             originalLatex: element.getAttribute('data-original-latex') || '',
             editingId: element.getAttribute('data-math-editing') || '',
           }
@@ -235,12 +238,79 @@ export const MathEditingNode = Node.create({
   renderHTML({ HTMLAttributes }) {
     return ['span', mergeAttributes(HTMLAttributes, {
       'data-math-editing': HTMLAttributes.editingId,
-      'data-math-type': HTMLAttributes.mathType,
+      'data-math-type': 'inline',
       'data-original-latex': HTMLAttributes.originalLatex,
     })]
   },
 
   addNodeView() {
     return ReactNodeViewRenderer(MathEditingNodeView)
+  },
+})
+
+// Define the block math editing node
+export const BlockMathEditingNode = Node.create({
+  name: 'blockMathEditingNode',
+
+  group: 'block',
+
+  inline: false,
+
+  atom: true,
+
+  addAttributes() {
+    return {
+      mathType: {
+        default: 'block',
+      },
+      originalLatex: {
+        default: '',
+      },
+      currentLatex: {
+        default: '',
+      },
+      editingId: {
+        default: '',
+      },
+    }
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'div[data-math-editing][data-math-type="block"]',
+        getAttrs: (element) => {
+          if (typeof element === 'string') return false
+          
+          return {
+            mathType: 'block',
+            originalLatex: element.getAttribute('data-original-latex') || '',
+            editingId: element.getAttribute('data-math-editing') || '',
+          }
+        },
+      },
+    ]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['div', mergeAttributes(HTMLAttributes, {
+      'data-math-editing': HTMLAttributes.editingId,
+      'data-math-type': 'block',
+      'data-original-latex': HTMLAttributes.originalLatex,
+      'class': 'block-math-editing-wrapper'
+    })]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(MathEditingNodeView)
+  },
+})
+
+// Export both nodes as a combined extension for backward compatibility
+export const MathEditingNode = Node.create({
+  name: 'mathEditingNode',
+  
+  addExtensions() {
+    return [InlineMathEditingNode, BlockMathEditingNode]
   },
 })
