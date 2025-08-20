@@ -1,7 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, protocol, Menu } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { 
+  createDocumentArchive, 
+  extractDocumentArchive, 
+  isValidDocumentArchive,
+  cleanupTempDirectory
+} from './documentUtils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,6 +18,7 @@ let openOnReadyFilePath = null;
 const childWindows = new Set();
 const tokenToWindow = new Map();
 let lastFocusedWindow = null;
+const documentTempDirs = new Set(); // Track temp directories for cleanup
 
 const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
@@ -24,6 +32,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webSecurity: false, // Allow custom protocols
     },
     show: false,
   });
@@ -88,30 +97,48 @@ function buildMenu() {
             });
             if (!canceled && filePaths[0]) {
               const filePath = filePaths[0];
-              const content = await fs.readFile(filePath, 'utf-8');
-              let data = {};
+              
               try {
-                if (content.trim().startsWith('<')) {
-                  const extract = (tag) => {
-                    const m = content.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`));
-                    return m ? m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') : '';
-                  };
-                  data = {
-                    title: extract('title'),
-                    description: extract('description'),
-                    goals: extract('goals'),
-                    hypotheses: extract('hypotheses'),
-                    plan: extract('plan'),
-                    contentHtml: extract('contentHtml'),
-                  };
+                let data = {};
+                
+                // First, try to load as new archive format
+                if (await isValidDocumentArchive(filePath)) {
+                  data = await extractDocumentArchive(filePath);
+                  // Track temp directory for cleanup
+                  if (data._tempDir) {
+                    documentTempDirs.add(data._tempDir);
+                  }
                 } else {
-                  data = JSON.parse(content);
+                  // Fallback to legacy format
+                  const content = await fs.readFile(filePath, 'utf-8');
+                  
+                  if (content.trim().startsWith('<')) {
+                    // Legacy XML format
+                    const extract = (tag) => {
+                      const m = content.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`));
+                      return m ? m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') : '';
+                    };
+                    data = {
+                      title: extract('title'),
+                      description: extract('description'),
+                      goals: extract('goals'),
+                      hypotheses: extract('hypotheses'),
+                      plan: extract('plan'),
+                      contentHtml: extract('contentHtml'),
+                      version: 1 // Mark as legacy
+                    };
+                  } else {
+                    // Legacy JSON format
+                    data = JSON.parse(content);
+                    data.version = data.version || 1; // Mark as legacy if no version
+                  }
                 }
-              } catch (e) {
+                
+                (lastFocusedWindow || mainWindow)?.webContents.send('file:opened', { filePath, data });
+              } catch (error) {
+                console.error('Error opening document:', error);
                 dialog.showErrorBox('Ошибка', 'Не удалось прочитать файл');
-                return;
               }
-              (lastFocusedWindow || mainWindow)?.webContents.send('file:opened', { filePath, data });
             }
         }},
         { type: 'separator' },
@@ -196,6 +223,15 @@ app.on('open-file', (event, filePath) => {
 });
 
 app.whenReady().then(() => {
+  // Register custom protocol for serving local images
+  protocol.registerFileProtocol('rsrch-image', (request, callback) => {
+    const url = request.url.substr('rsrch-image://'.length);
+    // Remove cache-busting parameters (everything after ?)
+    const urlWithoutParams = url.split('?')[0];
+    const decodedPath = decodeURIComponent(urlWithoutParams);
+    callback({ path: decodedPath });
+  });
+
   createWindow();
   buildMenu();
 
@@ -217,6 +253,7 @@ function openChildWindow(initialPayload) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webSecurity: false, // Allow custom protocols
     },
     parent: mainWindow || undefined,
   });
@@ -248,34 +285,9 @@ ipcMain.handle('dialog:save-document', async (_event, { defaultPath, jsonData, a
   });
   if (canceled || !filePath) return { canceled: true };
 
-  let content = '';
-  if (asXml) {
-    // very simple xml conversion
-    const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const xml = [
-      '<research>',
-      `<title>${escape(jsonData.title || '')}</title>`,
-      `<description>${escape(jsonData.description || '')}</description>`,
-      `<goals>${escape(jsonData.goals || '')}</goals>`,
-      `<hypotheses>${escape(jsonData.hypotheses || '')}</hypotheses>`,
-      `<plan>${escape(jsonData.plan || '')}</plan>`,
-      `<contentHtml>${escape(jsonData.contentHtml || '')}</contentHtml>`,
-      '</research>',
-    ].join('');
-    content = xml;
-  } else {
-    content = JSON.stringify(jsonData, null, 2);
-  }
-
-  await fs.writeFile(filePath, content, 'utf-8');
-  return { canceled: false, filePath };
-});
-
-ipcMain.handle('dialog:save-document-to-path', async (_event, { filePath, jsonData, asXml = false }) => {
-  if (!filePath) return { canceled: true };
   try {
-    let content = '';
     if (asXml) {
+      // Legacy XML format - keep old behavior for compatibility
       const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const xml = [
         '<research>',
@@ -287,13 +299,44 @@ ipcMain.handle('dialog:save-document-to-path', async (_event, { filePath, jsonDa
         `<contentHtml>${escape(jsonData.contentHtml || '')}</contentHtml>`,
         '</research>',
       ].join('');
-      content = xml;
+      await fs.writeFile(filePath, xml, 'utf-8');
     } else {
-      content = JSON.stringify(jsonData, null, 2);
+      // New archive format
+      await createDocumentArchive(jsonData, filePath);
     }
-    await fs.writeFile(filePath, content, 'utf-8');
+    
     return { canceled: false, filePath };
-  } catch (e) {
+  } catch (error) {
+    console.error('Error saving document:', error);
+    dialog.showErrorBox('Ошибка', 'Не удалось сохранить файл');
+    return { canceled: true };
+  }
+});
+
+ipcMain.handle('dialog:save-document-to-path', async (_event, { filePath, jsonData, asXml = false }) => {
+  if (!filePath) return { canceled: true };
+  try {
+    if (asXml) {
+      // Legacy XML format - keep old behavior for compatibility
+      const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const xml = [
+        '<research>',
+        `<title>${escape(jsonData.title || '')}</title>`,
+        `<description>${escape(jsonData.description || '')}</description>`,
+        `<goals>${escape(jsonData.goals || '')}</goals>`,
+        `<hypotheses>${escape(jsonData.hypotheses || '')}</hypotheses>`,
+        `<plan>${escape(jsonData.plan || '')}</plan>`,
+        `<contentHtml>${escape(jsonData.contentHtml || '')}</contentHtml>`,
+        '</research>',
+      ].join('');
+      await fs.writeFile(filePath, xml, 'utf-8');
+    } else {
+      // New archive format
+      await createDocumentArchive(jsonData, filePath);
+    }
+    return { canceled: false, filePath };
+  } catch (error) {
+    console.error('Error saving document:', error);
     dialog.showErrorBox('Ошибка', 'Не удалось сохранить файл');
     return { canceled: true };
   }
@@ -314,11 +357,24 @@ ipcMain.handle('dialog:open-document', async () => {
   });
   if (canceled || !filePaths[0]) return { canceled: true };
   const filePath = filePaths[0];
-  const content = await fs.readFile(filePath, 'utf-8');
-  let data = {};
+  
   try {
+    // First, try to load as new archive format
+    if (await isValidDocumentArchive(filePath)) {
+      const data = await extractDocumentArchive(filePath);
+      // Track temp directory for cleanup
+      if (data._tempDir) {
+        documentTempDirs.add(data._tempDir);
+      }
+      return { canceled: false, filePath, data };
+    }
+    
+    // Fallback to legacy format
+    const content = await fs.readFile(filePath, 'utf-8');
+    let data = {};
+    
     if (content.trim().startsWith('<')) {
-      // naive xml parse
+      // Legacy XML format
       const extract = (tag) => {
         const m = content.match(new RegExp(`<${tag}>([\s\S]*?)<\/${tag}>`));
         return m ? m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') : '';
@@ -330,22 +386,40 @@ ipcMain.handle('dialog:open-document', async () => {
         hypotheses: extract('hypotheses'),
         plan: extract('plan'),
         contentHtml: extract('contentHtml'),
+        version: 1 // Mark as legacy
       };
     } else {
+      // Legacy JSON format
       data = JSON.parse(content);
+      data.version = data.version || 1; // Mark as legacy if no version
     }
-  } catch (e) {
+    
+    return { canceled: false, filePath, data };
+  } catch (error) {
+    console.error('Error opening document:', error);
     dialog.showErrorBox('Ошибка', 'Не удалось прочитать файл');
     return { canceled: true };
   }
-  return { canceled: false, filePath, data };
 });
 
 ipcMain.handle('file:open-path', async (_event, filePath) => {
   try {
+    // First, try to load as new archive format
+    if (await isValidDocumentArchive(filePath)) {
+      const data = await extractDocumentArchive(filePath);
+      // Track temp directory for cleanup
+      if (data._tempDir) {
+        documentTempDirs.add(data._tempDir);
+      }
+      return { canceled: false, filePath, data };
+    }
+    
+    // Fallback to legacy format
     const content = await fs.readFile(filePath, 'utf-8');
     let data = {};
+    
     if (content.trim().startsWith('<')) {
+      // Legacy XML format
       const extract = (tag) => {
         const m = content.match(new RegExp(`<${tag}>([\s\S]*?)<\/${tag}>`));
         return m ? m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') : '';
@@ -357,12 +431,17 @@ ipcMain.handle('file:open-path', async (_event, filePath) => {
         hypotheses: extract('hypotheses'),
         plan: extract('plan'),
         contentHtml: extract('contentHtml'),
+        version: 1 // Mark as legacy
       };
     } else {
+      // Legacy JSON format
       data = JSON.parse(content);
+      data.version = data.version || 1; // Mark as legacy if no version
     }
+    
     return { canceled: false, filePath, data };
-  } catch (e) {
+  } catch (error) {
+    console.error('Error opening document:', error);
     dialog.showErrorBox('Ошибка', 'Не удалось прочитать файл');
     return { canceled: true };
   }
@@ -429,11 +508,17 @@ ipcMain.handle('window:close-self', async (event) => {
 });
 
 // Ensure child windows close when main closes
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
   for (const w of Array.from(childWindows)) {
     try { w.destroy(); } catch {}
   }
   childWindows.clear();
+  
+  // Clean up all temporary directories
+  for (const tempDir of documentTempDirs) {
+    await cleanupTempDirectory(tempDir);
+  }
+  documentTempDirs.clear();
 });
 
 // External drag events (for future richer DnD between windows)
@@ -443,7 +528,7 @@ ipcMain.on('drag:start', (_e, _payload) => {
   }
 });
 
-// Open image file dialog and return file path
+// Open image file dialog and immediately create temp copy for editing
 ipcMain.handle('dialog:open-image', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: 'Выбрать изображение',
@@ -453,26 +538,139 @@ ipcMain.handle('dialog:open-image', async () => {
     ],
   });
   if (canceled || !filePaths[0]) return { canceled: true };
-  const filePath = filePaths[0];
+  const originalPath = filePaths[0];
+  
   try {
-    const ext = (filePath.split('.').pop() || '').toLowerCase();
+    const ext = (originalPath.split('.').pop() || '').toLowerCase();
     const mime = ext === 'png' ? 'image/png'
       : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
       : ext === 'gif' ? 'image/gif'
       : ext === 'svg' ? 'image/svg+xml'
       : ext === 'webp' ? 'image/webp'
       : 'application/octet-stream';
-    const buf = await fs.readFile(filePath);
-    const b64 = buf.toString('base64');
-    const dataUrl = `data:${mime};base64,${b64}`;
-    return { canceled: false, dataUrl };
-  } catch (e) {
+    
+    // Get file stats for size
+    const stats = await fs.stat(originalPath);
+    
+    // Create temp directory for this new image
+    const tempDir = path.join(os.tmpdir(), `rsrch_new_image_${Date.now()}`);
+    await fs.mkdir(tempDir, { recursive: true });
+    
+    // Copy image to temp directory to avoid modifying original
+    const fileName = path.basename(originalPath);
+    const tempPath = path.join(tempDir, fileName);
+    const imageBuffer = await fs.readFile(originalPath);
+    await fs.writeFile(tempPath, imageBuffer);
+    
+    // Track temp directory for cleanup
+    documentTempDirs.add(tempDir);
+    
+    // Return custom protocol URL pointing to temp copy
+    const normalizedPath = tempPath.replace(/\\/g, '/');
+    const customUrl = `rsrch-image://${encodeURIComponent(normalizedPath)}`;
+    
+    return { 
+      canceled: false, 
+      dataUrl: customUrl, // Use custom protocol URL to temp copy
+      originalPath: originalPath, // Keep reference to original
+      tempPath: tempPath, // Path to temp copy for editing
+      tempDir: tempDir, // Temp directory for cleanup
+      mimeType: mime,
+      size: stats.size
+    };
+  } catch (error) {
+    console.error('Error processing image:', error);
     return { canceled: true };
   }
 });
 ipcMain.on('drag:end', () => {
   for (const w of BrowserWindow.getAllWindows()) {
     w.webContents.send('external:drag-end');
+  }
+});
+
+// Clean up temporary directory for a specific document
+ipcMain.handle('document:cleanup-temp', async (_event, tempDir) => {
+  if (tempDir && documentTempDirs.has(tempDir)) {
+    await cleanupTempDirectory(tempDir);
+    documentTempDirs.delete(tempDir);
+  }
+  return { ok: true };
+});
+
+// Create temporary file from image data for editing
+ipcMain.handle('image:create-temp', async (_event, { imageData, originalPath, mimeType }) => {
+  try {
+    const tempDir = path.join(os.tmpdir(), `rsrch_image_edit_${Date.now()}`);
+    await fs.mkdir(tempDir, { recursive: true });
+    
+    let imageBuffer;
+    let fileName;
+    
+    if (imageData.startsWith('data:')) {
+      // Handle base64 data
+      const base64Data = imageData.split(',')[1];
+      imageBuffer = Buffer.from(base64Data, 'base64');
+      const ext = mimeType ? mimeType.split('/')[1] : 'png';
+      fileName = `temp_image.${ext}`;
+    } else if (imageData.startsWith('rsrch-image://')) {
+      // Handle custom protocol URL
+      const decodedPath = decodeURIComponent(imageData.replace('rsrch-image://', ''));
+      imageBuffer = await fs.readFile(decodedPath);
+      fileName = path.basename(decodedPath);
+    } else if (originalPath) {
+      // Handle file path
+      imageBuffer = await fs.readFile(originalPath);
+      fileName = path.basename(originalPath);
+    } else {
+      throw new Error('Invalid image data provided');
+    }
+    
+    const tempFilePath = path.join(tempDir, fileName);
+    await fs.writeFile(tempFilePath, imageBuffer);
+    
+    // Track temp directory for cleanup
+    documentTempDirs.add(tempDir);
+    
+    // Return custom protocol URL for the temp file
+    const normalizedPath = tempFilePath.replace(/\\/g, '/');
+    const customUrl = `rsrch-image://${encodeURIComponent(normalizedPath)}`;
+    
+    return {
+      success: true,
+      tempPath: tempFilePath,
+      customUrl,
+      tempDir
+    };
+  } catch (error) {
+    console.error('Error creating temp image:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Save edited image data to temporary file
+ipcMain.handle('image:save-temp-edit', async (_event, { tempPath, imageData }) => {
+  try {
+    if (!imageData.startsWith('data:')) {
+      throw new Error('Expected base64 data URL for saving');
+    }
+    
+    const base64Data = imageData.split(',')[1];
+    const imageBuffer = Buffer.from(base64Data, 'base64');
+    
+    await fs.writeFile(tempPath, imageBuffer);
+    
+    // Return custom protocol URL for the updated file
+    const normalizedPath = tempPath.replace(/\\/g, '/');
+    const customUrl = `rsrch-image://${encodeURIComponent(normalizedPath)}`;
+    
+    return {
+      success: true,
+      customUrl
+    };
+  } catch (error) {
+    console.error('Error saving temp image edit:', error);
+    return { success: false, error: error.message };
   }
 });
 

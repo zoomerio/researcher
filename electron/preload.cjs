@@ -54,6 +54,9 @@ const api = {
     ipcRenderer.removeAllListeners('external:drag-end');
     ipcRenderer.on('external:drag-end', () => cb());
   },
+  cleanupDocumentTemp: (tempDir) => ipcRenderer.invoke('document:cleanup-temp', tempDir),
+  createTempImage: (payload) => ipcRenderer.invoke('image:create-temp', payload),
+  saveTempImageEdit: (payload) => ipcRenderer.invoke('image:save-temp-edit', payload),
 };
 
 contextBridge.exposeInMainWorld('api', api);

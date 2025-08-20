@@ -139,9 +139,9 @@ const DrawingCanvas: React.FC<{
   const [brushSize, setBrushSize] = useState(5)
   const [brushColor, setBrushColor] = useState('#000000')
 
-  // Use larger canvas dimensions for better quality
-  const canvasWidth = Math.max(width, 800)
-  const canvasHeight = Math.max(height, 600)
+  // Use original image dimensions for canvas to avoid white stripes
+  const canvasWidth = width
+  const canvasHeight = height
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -161,10 +161,8 @@ const DrawingCanvas: React.FC<{
     if (initialImage) {
       const img = new Image()
       img.onload = () => {
-        // Center the image on the canvas
-        const x = (canvasWidth - width) / 2
-        const y = (canvasHeight - height) / 2
-        ctx.drawImage(img, x, y, width, height)
+        // Draw image at full canvas size
+        ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight)
       }
       img.src = initialImage
     }
@@ -378,10 +376,10 @@ const DrawingCanvas: React.FC<{
             border: '1px solid #ccc', 
             cursor: tool === 'brush' ? 'crosshair' : 'grab',
             display: 'block',
-            width: `${canvasWidth}px`,
-            height: `${canvasHeight}px`,
-            maxWidth: '100%',
-            maxHeight: 'calc(90vh - 200px)' // Leave space for controls
+            maxWidth: '90vw',
+            maxHeight: 'calc(90vh - 200px)', // Leave space for controls
+            width: 'auto',
+            height: 'auto'
           }}
         />
 
@@ -649,10 +647,23 @@ const MeasurementTool: React.FC<{
 }> = ({ imageRef, imageWidth, imageHeight, onClose }) => {
   const measurementImageRef = useRef<HTMLImageElement>(null)
   
-  const MINIMUM_WIDTH = 400
-  const MINIMUM_HEIGHT = 300
-  const overlayWidth = Math.max(imageWidth, MINIMUM_WIDTH)
-  const overlayHeight = Math.max(imageHeight, MINIMUM_HEIGHT)
+  // Calculate proper container size maintaining aspect ratio
+  const aspectRatio = imageWidth / imageHeight
+  const maxWidth = Math.min(imageWidth, window.innerWidth * 0.9)
+  const maxHeight = Math.min(imageHeight, window.innerHeight * 0.7)
+  
+  let containerWidth = imageWidth
+  let containerHeight = imageHeight
+  
+  // Scale down if too large, maintaining aspect ratio
+  if (containerWidth > maxWidth || containerHeight > maxHeight) {
+    const widthRatio = maxWidth / containerWidth
+    const heightRatio = maxHeight / containerHeight
+    const ratio = Math.min(widthRatio, heightRatio)
+    
+    containerWidth = Math.round(containerWidth * ratio)
+    containerHeight = Math.round(containerHeight * ratio)
+  }
   
   const [measurements, setMeasurements] = useState<Array<{
     id: string
@@ -672,7 +683,7 @@ const MeasurementTool: React.FC<{
   } | null>(null)
   const [pixelsPerUnit, setPixelsPerUnit] = useState(100) // pixels per unit
   const [unit, setUnit] = useState('см')
-  const [displayedImageSize, setDisplayedImageSize] = useState({ width: overlayWidth, height: overlayHeight })
+  const [displayedImageSize, setDisplayedImageSize] = useState({ width: containerWidth, height: containerHeight })
 
   // Update displayed image size when image loads
   useEffect(() => {
@@ -736,19 +747,18 @@ const MeasurementTool: React.FC<{
 
     if (distance > 5) { // Only add measurement if line is long enough
       // Convert display coordinates to actual image coordinates for accurate measurement
-      const scaleX = overlayWidth / displayedImageSize.width
-      const scaleY = overlayHeight / displayedImageSize.height
+      const scaleX = containerWidth / displayedImageSize.width
+      const scaleY = containerHeight / displayedImageSize.height
       const actualDistance = distance * Math.max(scaleX, scaleY) // Use the larger scale to be more accurate
       
       const realDistance = actualDistance / pixelsPerUnit
-      const newMeasurement: Measurement = {
+      const newMeasurement = {
         id: Date.now().toString(),
         x1: currentMeasurement.x1,
         y1: currentMeasurement.y1,
         x2: currentMeasurement.x2,
         y2: currentMeasurement.y2,
         distance: realDistance,
-        unit,
         label: `${realDistance.toFixed(2)} ${unit}`
       }
       setMeasurements(prev => [...prev, newMeasurement])
@@ -831,27 +841,29 @@ const MeasurementTool: React.FC<{
         {/* Measurement area with image and overlay */}
         <div style={{
           position: 'relative',
-          width: `${displayedImageSize.width}px`,
-          height: `${displayedImageSize.height}px`,
-          maxWidth: '90vw',
-          maxHeight: '70vh',
+          width: `${containerWidth}px`,
+          height: `${containerHeight}px`,
           border: '2px solid #ddd',
           borderRadius: '4px',
           overflow: 'hidden',
-          backgroundColor: '#f9f9f9',
-          margin: '0 auto'
+          backgroundColor: 'transparent',
+          margin: '0 auto',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
         }}>
-          {/* Background image - fills container exactly */}
+          {/* Background image - maintains aspect ratio */}
           {imageRef.current && (
             <img
               ref={measurementImageRef}
               src={imageRef.current.src}
               alt="Measurement target"
               style={{
-                width: '100%',
-                height: '100%',
+                width: `${containerWidth}px`,
+                height: `${containerHeight}px`,
                 objectFit: 'contain',
-                pointerEvents: 'none'
+                pointerEvents: 'none',
+                display: 'block'
               }}
             />
           )}
@@ -1173,6 +1185,8 @@ const IllustrationNodeView = React.memo(({ node, updateAttributes, deleteNode, g
     }
   }, [originalWidth, originalHeight])
 
+
+
   const handleResize = useCallback((e: React.MouseEvent, direction: string) => {
     e.preventDefault()
     e.stopPropagation()
@@ -1271,23 +1285,98 @@ const IllustrationNodeView = React.memo(({ node, updateAttributes, deleteNode, g
     document.addEventListener('mouseup', handleMouseUp)
   }, [width, height, updateAttributes])
 
-  const handleDrawingSave = (dataUrl: string) => {
-    updateAttributes({ src: dataUrl })
-    setShowDrawing(false)
+  const handleDrawingSave = async (dataUrl: string) => {
+    try {
+      let result;
+      
+      if (src.startsWith('rsrch-image://')) {
+        // For existing temp files, save to the same path but add cache-busting
+        const urlWithoutProtocol = src.replace('rsrch-image://', '');
+        const pathWithoutParams = urlWithoutProtocol.split('?')[0]; // Remove cache-busting params
+        const tempPath = decodeURIComponent(pathWithoutParams);
+        result = await (window as any).api.saveTempImageEdit({
+          tempPath: tempPath,
+          imageData: dataUrl
+        });
+        
+        if (result.success) {
+          // Add cache-busting parameter to force browser reload
+          const cacheBuster = Date.now();
+          const newUrl = `${result.customUrl}?v=${cacheBuster}`;
+          updateAttributes({ src: newUrl });
+        }
+      } else {
+        // For old images or base64 images, create new temp file
+        result = await (window as any).api.createTempImage({
+          imageData: src.startsWith('data:') ? src : dataUrl, // Use original src if it's base64, otherwise use drawing
+          originalPath: src.startsWith('rsrch-image://') ? decodeURIComponent(src.replace('rsrch-image://', '')) : undefined,
+          mimeType: 'image/png'
+        });
+        
+        if (result.success) {
+          // Now save the drawing to the new temp file
+          const editResult = await (window as any).api.saveTempImageEdit({
+            tempPath: result.tempPath,
+            imageData: dataUrl
+          });
+          
+          if (editResult.success) {
+            const cacheBuster = Date.now();
+            const newUrl = `${editResult.customUrl}?v=${cacheBuster}`;
+            updateAttributes({ src: newUrl });
+          }
+        }
+      }
+      
+      if (!result || !result.success) {
+        console.error('Failed to save image edit:', result?.error);
+        // Fallback to base64 if temp operations fail
+        updateAttributes({ src: dataUrl });
+      }
+    } catch (error) {
+      console.error('Error saving drawing:', error);
+      // Fallback to base64 if anything fails
+      updateAttributes({ src: dataUrl });
+    }
+    
+    setShowDrawing(false);
   }
 
-  const handleSignatureSave = (dataUrl: string) => {
-    // Insert signature as a new image node
-    if (editor) {
-      editor?.chain().focus().insertIllustration({ 
+  const handleSignatureSave = async (dataUrl: string) => {
+    try {
+      // Create temp file for signature
+      const result = await (window as any).api.createTempImage({
+        imageData: dataUrl,
+        mimeType: 'image/png'
+      });
+      
+      if (result.success) {
+        // Replace current image with signature
+        updateAttributes({ 
+          src: result.customUrl,
+          width: 300,
+          height: 100
+        });
+      } else {
+        console.error('Failed to create temp signature:', result?.error);
+        // Fallback to base64 if temp creation fails
+        updateAttributes({ 
+          src: dataUrl,
+          width: 300,
+          height: 100
+        });
+      }
+    } catch (error) {
+      console.error('Error saving signature:', error);
+      // Fallback to base64 if anything fails
+      updateAttributes({ 
         src: dataUrl,
         width: 300,
-        height: 100,
-        alignment: 'left',
-        textWrap: 'none'
-      }).run()
+        height: 100
+      });
     }
-    setShowSignature(false)
+    
+    setShowSignature(false);
   }
 
   // Global event listeners for selection management
@@ -1301,7 +1390,8 @@ const IllustrationNodeView = React.memo(({ node, updateAttributes, deleteNode, g
 
     const handleIllustrationDeselect = (event: any) => {
       const excludeId = event.detail?.excludeId
-      if (excludeId !== nodeIdRef.current && isSelectedRef.current) {
+      // If excludeId is null (empty space click) or different from this node, deselect
+      if ((excludeId === null || excludeId !== nodeIdRef.current) && isSelectedRef.current) {
         setIsSelected(false)
       }
     }
@@ -1314,6 +1404,7 @@ const IllustrationNodeView = React.memo(({ node, updateAttributes, deleteNode, g
           detail: {
             node,
             updateAttributes,
+            deleteNode,
             startDrawing: () => setShowDrawing(true),
             startMeasurement: () => setShowMeasurement(true),
             startCaptionEdit: () => setShowCaptionInput(true)
@@ -1348,6 +1439,7 @@ const IllustrationNodeView = React.memo(({ node, updateAttributes, deleteNode, g
       detail: {
         node,
         updateAttributes,
+        deleteNode,
         startDrawing: () => setShowDrawing(true),
         startMeasurement: () => setShowMeasurement(true),
         startCaptionEdit: () => setShowCaptionInput(true)
@@ -1445,6 +1537,20 @@ const IllustrationNodeView = React.memo(({ node, updateAttributes, deleteNode, g
               }
             }}
           />
+
+          {/* Caption - always centered under the image */}
+          {caption && (
+            <div style={{
+              textAlign: 'center',
+              fontSize: '14px',
+              color: '#666',
+              fontStyle: 'italic',
+              marginTop: '8px',
+              padding: '0 4px'
+            }}>
+              {caption}
+            </div>
+          )}
 
                  {/* Controls (shown when selected) */}
          {isSelected && (
@@ -1654,21 +1760,7 @@ const IllustrationNodeView = React.memo(({ node, updateAttributes, deleteNode, g
          )}
       </div>
 
-      {/* Caption */}
-      {caption && (
-        <div 
-          className="illustration-caption"
-          style={{ 
-            fontSize: '14px', 
-            color: '#333', 
-            fontStyle: 'italic', 
-            marginTop: '8px',
-            textAlign: 'center'
-          }}
-        >
-          {caption}
-        </div>
-      )}
+
 
       {/* Drawing modal */}
       {showDrawing && originalDimensions.current && (
@@ -1839,21 +1931,13 @@ export const IllustrationNode = Node.create({
     if (safeAttributes.width) imgAttrs.width = safeAttributes.width
     if (safeAttributes.height) imgAttrs.height = safeAttributes.height
 
-    const elements = [
-      ['img', imgAttrs]
-    ]
-    
-    // Only add caption element if caption exists and is not empty
-    if (safeAttributes.caption && safeAttributes.caption.trim()) {
-      elements.push(['div', { class: 'caption' }, safeAttributes.caption])
-    }
-    
+    // Only render the image in HTML - caption is handled by React component
     return [
       'div',
       mergeAttributes(HTMLAttributes, {
         'data-type': 'illustration',
       }),
-      ...elements
+      ['img', imgAttrs]
     ]
   },
 

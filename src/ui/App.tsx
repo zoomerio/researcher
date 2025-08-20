@@ -266,6 +266,7 @@ export const App: React.FC = () => {
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [dropBefore, setDropBefore] = useState<boolean>(false);
   const [selectedGraph, setSelectedGraph] = useState<any>(null);
+  const [selectedIllustration, setSelectedIllustration] = useState<any>(null);
   
   // Math editing state
   const [mathEditingState, setMathEditingState] = useState<{
@@ -884,6 +885,16 @@ export const App: React.FC = () => {
     return () => document.removeEventListener('graphSelected', handleGraphSelected)
   }, [])
 
+  // Global illustration selection management - works regardless of active tab
+  useEffect(() => {
+    const handleIllustrationSelected = (event: any) => {
+      setSelectedIllustration(event.detail)
+    }
+
+    document.addEventListener('illustrationSelected', handleIllustrationSelected)
+    return () => document.removeEventListener('illustrationSelected', handleIllustrationSelected)
+  }, [])
+
   // Global click handler to deselect graphs and illustrations when clicking empty space
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
@@ -891,14 +902,15 @@ export const App: React.FC = () => {
       // Check if click is on editor content but not on a graph or illustration
       if (target.closest('.a4-canvas') && !target.closest('.graph-node') && !target.closest('.illustration-node')) {
         setSelectedGraph(null)
+        setSelectedIllustration(null)
         // Remove selection styling from all graphs
         document.querySelectorAll('.graph-node').forEach(el => {
           el.classList.remove('selected')
         })
         
         // Deselect illustrations
-        document.dispatchEvent(new CustomEvent('illustrationSelected', { 
-          detail: null
+        document.dispatchEvent(new CustomEvent('illustrationDeselect', { 
+          detail: { excludeId: null }
         }))
       }
     }
@@ -1673,7 +1685,7 @@ export const App: React.FC = () => {
 
               {activeTool === 'images' && (
                 <div className="toolbar images-wrapper">
-                  <ImagesBar editor={editor} activeTool={activeTool} />
+                  <ImagesBar editor={editor} activeTool={activeTool} selectedIllustration={selectedIllustration} setSelectedIllustration={setSelectedIllustration} />
                 </div>
               )}
                 </div>
@@ -2112,50 +2124,8 @@ const FormulaBar: React.FC<{
   );
 };
 
-const ImagesBar: React.FC<{ editor: any; activeTool: string }> = ({ editor, activeTool }) => {
-  const [selectedIllustration, setSelectedIllustration] = useState<any>(null)
-  const [, setForceUpdate] = useState({})
+const ImagesBar: React.FC<{ editor: any; activeTool: string; selectedIllustration: any; setSelectedIllustration: (value: any) => void }> = ({ editor, activeTool, selectedIllustration, setSelectedIllustration }) => {
 
-  // Force re-render to update UI
-  const triggerUpdate = useCallback(() => {
-    setForceUpdate({})
-  }, [])
-
-  // Listen for illustration selection events
-  useEffect(() => {
-    const handleIllustrationSelected = (event: any) => {
-      setSelectedIllustration(event.detail)
-      triggerUpdate()
-    }
-
-    document.addEventListener('illustrationSelected', handleIllustrationSelected)
-    return () => document.removeEventListener('illustrationSelected', handleIllustrationSelected)
-  }, [triggerUpdate])
-
-  // Sync selection state when Images tab becomes active
-  useEffect(() => {
-    if (activeTool === 'images' && !selectedIllustration) {
-      // Use a small delay to ensure the DOM is ready
-      const timeoutId = setTimeout(() => {
-        // Look for illustrations with the blue border (indicating selection)
-        const illustrations = document.querySelectorAll('.illustration-node > div')
-        for (const illustration of illustrations) {
-          const computedStyle = window.getComputedStyle(illustration)
-          // Check if it has the blue border indicating selection
-          if (computedStyle.borderColor === 'rgb(0, 122, 204)' || computedStyle.borderColor === '#007acc') {
-            // Found a selected illustration - dispatch custom event to sync state without re-selecting
-            const event = new CustomEvent('syncIllustrationSelection', {
-              detail: { element: illustration }
-            })
-            document.dispatchEvent(event)
-            break
-          }
-        }
-      }, 150)
-      
-      return () => clearTimeout(timeoutId)
-    }
-  }, [activeTool, selectedIllustration])
 
   // Image compression utility
   const compressImage = (dataUrl: string, maxWidth = 1920, maxHeight = 1080, quality = 0.85): Promise<string> => {
@@ -2236,49 +2206,81 @@ const ImagesBar: React.FC<{ editor: any; activeTool: string }> = ({ editor, acti
     }
   }
 
-  function createDrawing() {
-    // Create a smaller blank canvas for drawing (can be resized later)
-    const canvas = document.createElement('canvas')
-    canvas.width = 600
-    canvas.height = 400
-    const ctx = canvas.getContext('2d')
-    if (ctx) {
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, 600, 400)
-      // Use JPEG for smaller file size since it's a solid white background
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
-      
-      editor?.chain().focus().insertIllustration({ 
-        src: dataUrl,
-        width: 600,
-        height: 400,
-        alignment: 'left',
-        textWrap: 'none' // No text wrapping by default
-      }).run()
+  async function createDrawing() {
+    try {
+      // Create a smaller blank canvas for drawing (can be resized later)
+      const canvas = document.createElement('canvas')
+      canvas.width = 600
+      canvas.height = 400
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, 600, 400)
+        // Use JPEG for smaller file size since it's a solid white background
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
+        
+        // Create temp file for the blank drawing
+        const result = await (window as any).api.createTempImage({
+          imageData: dataUrl,
+          mimeType: 'image/jpeg'
+        });
+        
+        if (result.success) {
+          editor?.chain().focus().insertIllustration({ 
+            src: result.customUrl,
+            width: 600,
+            height: 400,
+            alignment: 'left',
+            textWrap: 'none' // No text wrapping by default
+          }).run();
+        } else {
+          console.error('Failed to create temp drawing:', result.error);
+          // Fallback to base64 if temp creation fails
+          editor?.chain().focus().insertIllustration({ 
+            src: dataUrl,
+            width: 600,
+            height: 400,
+            alignment: 'left',
+            textWrap: 'none'
+          }).run();
+        }
+      }
+    } catch (error) {
+      console.error('Error creating drawing:', error);
     }
   }
 
   function updateAlignment(alignment: string) {
     if (selectedIllustration && selectedIllustration.updateAttributes) {
       selectedIllustration.updateAttributes({ alignment })
-      // Update local state to reflect changes immediately
+      // Update the selectedIllustration object with new attributes
       setSelectedIllustration((prev: any) => prev ? {
         ...prev,
-        node: { ...prev.node, attrs: { ...prev.node.attrs, alignment } }
+        node: {
+          ...prev.node,
+          attrs: {
+            ...prev.node.attrs,
+            alignment
+          }
+        }
       } : null)
-      triggerUpdate()
     }
   }
 
   function updateTextWrap(textWrap: string) {
     if (selectedIllustration && selectedIllustration.updateAttributes) {
       selectedIllustration.updateAttributes({ textWrap })
-      // Update local state to reflect changes immediately
+      // Update the selectedIllustration object with new attributes
       setSelectedIllustration((prev: any) => prev ? {
         ...prev,
-        node: { ...prev.node, attrs: { ...prev.node.attrs, textWrap } }
+        node: {
+          ...prev.node,
+          attrs: {
+            ...prev.node.attrs,
+            textWrap
+          }
+        }
       } : null)
-      triggerUpdate()
     }
   }
 
@@ -2312,7 +2314,7 @@ const ImagesBar: React.FC<{ editor: any; activeTool: string }> = ({ editor, acti
       {/* Group: Alignment */}
       <div className="tool-group">
         <button
-          className={`tool ${selectedIllustration?.node?.attrs?.alignment === 'left' ? 'active' : ''}`}
+          className={`tool ${(selectedIllustration?.node?.attrs?.alignment || 'left') === 'left' ? 'active' : ''}`}
           onClick={() => updateAlignment('left')}
           disabled={!selectedIllustration}
           title="Выровнять по левому краю"
@@ -2341,13 +2343,13 @@ const ImagesBar: React.FC<{ editor: any; activeTool: string }> = ({ editor, acti
       {/* Group: Text wrapping */}
       <div className="tool-group">
         <Dropdown
-          label={selectedIllustration?.node?.attrs?.textWrap === 'none' ? 'Без обтекания' : 'С обтеканием'}
+          label={(selectedIllustration?.node?.attrs?.textWrap || 'none') === 'none' ? 'Без обтекания' : 'С обтеканием'}
           icon={null}
           items={[
             { key: 'wrap', label: 'С обтеканием текстом' },
             { key: 'none', label: 'Без обтекания' },
           ]}
-          selectedKey={selectedIllustration?.node?.attrs?.textWrap || 'wrap'}
+          selectedKey={selectedIllustration?.node?.attrs?.textWrap || 'none'}
           onSelect={(key) => updateTextWrap(key)}
           active={!!selectedIllustration}
         />
