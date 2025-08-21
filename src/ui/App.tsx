@@ -285,7 +285,18 @@ export const App: React.FC = () => {
       migrateMathStrings(currentEditor);
     },
     extensions: [
-      StarterKit,
+      // Use optimized StarterKit from our optimization module
+      StarterKit.configure({
+        // Disable unnecessary extensions for better performance
+        blockquote: false,
+        horizontalRule: false,
+        dropcursor: false,
+        gapcursor: false,
+        // Note: history configuration is handled separately
+        heading: {
+          levels: [1, 2, 3, 4], // Reduced from 6 levels
+        },
+      }),
       TextStyle,
       FontSize,
       Color,

@@ -12,9 +12,25 @@ async function main() {
     process.exit(1);
   }
   const electronBinary = /** @type {string} */ (electron);
-  const child = spawn(electronBinary, ['.'], {
+  
+  // Memory optimization flags for development
+  // Note: V8 flags need to be passed via --js-flags for Electron
+  const electronArgs = [
+    '.',
+    '--js-flags=--expose-gc --max-old-space-size=512 --optimize-for-size --gc-interval=100',
+    '--memory-pressure-off',          // Electron-specific flag
+    '--no-sandbox',                   // Reduce security overhead in dev
+    '--disable-web-security',         // Allow local file access in dev
+  ];
+  
+  const child = spawn(electronBinary, electronArgs, {
     stdio: 'inherit',
-    env: { ...process.env, VITE_DEV_SERVER_URL: DEV_URL },
+    env: { 
+      ...process.env, 
+      VITE_DEV_SERVER_URL: DEV_URL,
+      NODE_ENV: 'development',
+      ELECTRON_IS_DEV: '1'
+    },
   });
   child.on('exit', (code) => process.exit(code ?? 0));
 }

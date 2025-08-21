@@ -1,7 +1,9 @@
 import { Node, mergeAttributes } from '@tiptap/core'
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
-import React, { useRef, useState, useEffect } from 'react'
-import Plot from 'react-plotly.js'
+import React, { useRef, useState, useEffect, Suspense } from 'react'
+
+// Lazy load Plotly to reduce initial bundle size and memory usage
+const LazyPlot = React.lazy(() => import('react-plotly.js'))
 
 // Simple placeholder component for now (will be replaced with Plotly when dependencies are installed)
 const PlotlyPlaceholder: React.FC<{ data: any; layout: any; config: any }> = ({ data, layout, config }) => {
@@ -547,11 +549,33 @@ const GraphNodeView = ({ node, updateAttributes, deleteNode, getPos, editor }: a
             justifyContent: 'center' // Center the plot within the full-width container
           }}
         >
-          <Plot 
-            data={currentData}
-            layout={currentLayout}
-            config={currentConfig}
-          />
+          <Suspense fallback={
+            <div style={{
+              width: currentLayout?.width || 400,
+              height: currentLayout?.height || 300,
+              border: '2px dashed #ccc',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#f9f9f9',
+              borderRadius: '4px',
+              fontSize: '14px',
+              color: '#333'
+            }}>
+              <div style={{ textAlign: 'center' }}>
+                <div>📊 Loading Plotly...</div>
+                <div style={{ fontSize: '12px', marginTop: '4px' }}>
+                  {currentData?.[0]?.type || 'scatter'} chart with {currentData?.[0]?.x?.length || 0} points
+                </div>
+              </div>
+            </div>
+          }>
+            <LazyPlot 
+              data={currentData}
+              layout={currentLayout}
+              config={currentConfig}
+            />
+          </Suspense>
         </div>
       )}
     </NodeViewWrapper>
