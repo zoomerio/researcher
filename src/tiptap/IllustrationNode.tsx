@@ -262,8 +262,23 @@ const DrawingCanvas: React.FC<{
       0, 0, width, height  // Destination: same size to preserve quality
     )
 
-    // PNG is lossless and will maintain all drawing details perfectly
-    const dataUrl = outputCanvas.toDataURL('image/png')
+    // Smart format selection based on original image
+    let dataUrl: string
+    if (initialImage) {
+      if (initialImage.includes('data:image/jpeg') || initialImage.includes('.jpg') || initialImage.includes('.jpeg')) {
+        // Original was JPEG - use JPEG with high quality to preserve drawing details
+        dataUrl = outputCanvas.toDataURL('image/jpeg', 0.92)
+      } else if (initialImage.includes('data:image/png') || initialImage.includes('.png')) {
+        // Original was PNG - keep as PNG for transparency/lossless quality
+        dataUrl = outputCanvas.toDataURL('image/png')
+      } else {
+        // Unknown format - default to JPEG for smaller size
+        dataUrl = outputCanvas.toDataURL('image/jpeg', 0.92)
+      }
+    } else {
+      // No original image (new drawing) - use JPEG for smaller size
+      dataUrl = outputCanvas.toDataURL('image/jpeg', 0.92)
+    }
     
     onSave(dataUrl)
   }
@@ -517,7 +532,8 @@ const SignatureTool: React.FC<{
     const canvas = canvasRef.current
     if (!canvas) return
 
-    const dataUrl = canvas.toDataURL('image/png')
+    // Use JPEG with high quality for new drawings to keep file size reasonable
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
     onSave(dataUrl)
   }
 
@@ -1307,10 +1323,11 @@ const IllustrationNodeView = React.memo(({ node, updateAttributes, deleteNode, g
         }
       } else {
         // For old images or base64 images, create new temp file
+        const mimeType = dataUrl.startsWith('data:image/jpeg') ? 'image/jpeg' : 'image/png';
         result = await (window as any).api.createTempImage({
           imageData: src.startsWith('data:') ? src : dataUrl, // Use original src if it's base64, otherwise use drawing
           originalPath: src.startsWith('rsrch-image://') ? decodeURIComponent(src.replace('rsrch-image://', '')) : undefined,
-          mimeType: 'image/png'
+          mimeType: mimeType
         });
         
         if (result.success) {

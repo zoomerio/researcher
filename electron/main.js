@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell, protocol, Menu } from 'elec
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { 
   createDocumentArchive, 
@@ -19,9 +20,15 @@ const childWindows = new Set();
 const tokenToWindow = new Map();
 let lastFocusedWindow = null;
 const documentTempDirs = new Set(); // Track temp directories for cleanup
+const imageHashToTempPath = new Map(); // Track image hash to temp file mapping
 
 const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
+
+// Helper function to generate image hash
+function generateImageHash(imageBuffer) {
+  return crypto.createHash('sha256').update(imageBuffer).digest('hex').substring(0, 16);
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -519,6 +526,7 @@ app.on('before-quit', async () => {
     await cleanupTempDirectory(tempDir);
   }
   documentTempDirs.clear();
+  imageHashToTempPath.clear();
 });
 
 // External drag events (for future richer DnD between windows)
@@ -601,9 +609,6 @@ ipcMain.handle('document:cleanup-temp', async (_event, tempDir) => {
 // Create temporary file from image data for editing
 ipcMain.handle('image:create-temp', async (_event, { imageData, originalPath, mimeType }) => {
   try {
-    const tempDir = path.join(os.tmpdir(), `rsrch_image_edit_${Date.now()}`);
-    await fs.mkdir(tempDir, { recursive: true });
-    
     let imageBuffer;
     let fileName;
     
@@ -626,11 +631,45 @@ ipcMain.handle('image:create-temp', async (_event, { imageData, originalPath, mi
       throw new Error('Invalid image data provided');
     }
     
-    const tempFilePath = path.join(tempDir, fileName);
+    // Generate content-based hash
+    const imageHash = generateImageHash(imageBuffer);
+    
+    // Check if we already have a temp file for this image content
+    if (imageHashToTempPath.has(imageHash)) {
+      const existingTempPath = imageHashToTempPath.get(imageHash);
+      try {
+        // Verify the existing file still exists
+        await fs.access(existingTempPath);
+        const normalizedPath = existingTempPath.replace(/\\/g, '/');
+        const customUrl = `rsrch-image://${encodeURIComponent(normalizedPath)}`;
+        
+        return {
+          success: true,
+          tempPath: existingTempPath,
+          customUrl,
+          tempDir: path.dirname(existingTempPath),
+          reused: true
+        };
+      } catch (error) {
+        // File no longer exists, remove from tracking
+        imageHashToTempPath.delete(imageHash);
+      }
+    }
+    
+    // Create new temp file
+    const tempDir = path.join(os.tmpdir(), `rsrch_image_edit_${Date.now()}_${imageHash}`);
+    await fs.mkdir(tempDir, { recursive: true });
+    
+    // Use hash-based filename for consistency
+    const ext = fileName.split('.').pop() || 'png';
+    const hashBasedFileName = `img_${imageHash}.${ext}`;
+    const tempFilePath = path.join(tempDir, hashBasedFileName);
+    
     await fs.writeFile(tempFilePath, imageBuffer);
     
-    // Track temp directory for cleanup
+    // Track temp directory and hash mapping
     documentTempDirs.add(tempDir);
+    imageHashToTempPath.set(imageHash, tempFilePath);
     
     // Return custom protocol URL for the temp file
     const normalizedPath = tempFilePath.replace(/\\/g, '/');
@@ -640,7 +679,8 @@ ipcMain.handle('image:create-temp', async (_event, { imageData, originalPath, mi
       success: true,
       tempPath: tempFilePath,
       customUrl,
-      tempDir
+      tempDir,
+      hash: imageHash
     };
   } catch (error) {
     console.error('Error creating temp image:', error);
@@ -658,7 +698,21 @@ ipcMain.handle('image:save-temp-edit', async (_event, { tempPath, imageData }) =
     const base64Data = imageData.split(',')[1];
     const imageBuffer = Buffer.from(base64Data, 'base64');
     
+    // Generate new hash for the edited image
+    const newImageHash = generateImageHash(imageBuffer);
+    
+    // Remove old hash mapping if it exists
+    for (const [hash, path] of imageHashToTempPath.entries()) {
+      if (path === tempPath) {
+        imageHashToTempPath.delete(hash);
+        break;
+      }
+    }
+    
     await fs.writeFile(tempPath, imageBuffer);
+    
+    // Update hash mapping with new content hash
+    imageHashToTempPath.set(newImageHash, tempPath);
     
     // Return custom protocol URL for the updated file
     const normalizedPath = tempPath.replace(/\\/g, '/');
@@ -666,7 +720,8 @@ ipcMain.handle('image:save-temp-edit', async (_event, { tempPath, imageData }) =
     
     return {
       success: true,
-      customUrl
+      customUrl,
+      hash: newImageHash
     };
   } catch (error) {
     console.error('Error saving temp image edit:', error);

@@ -3,6 +3,16 @@ import path from 'node:path';
 import JSZip from 'jszip';
 import { v4 as uuidv4 } from 'uuid';
 import os from 'node:os';
+import crypto from 'node:crypto';
+
+/**
+ * Generates a content-based hash for an image buffer
+ * @param {Buffer} imageBuffer - Image buffer
+ * @returns {string} - SHA256 hash of the image content
+ */
+function generateImageHash(imageBuffer) {
+  return crypto.createHash('sha256').update(imageBuffer).digest('hex').substring(0, 16);
+}
 
 /**
  * Extracts images from HTML content (both base64 and file:// URLs) and saves them as separate files
@@ -12,8 +22,8 @@ import os from 'node:os';
  */
 export async function extractImagesFromContent(contentHtml, tempDir) {
   const imageFiles = [];
+  const processedHashes = new Map(); // Track processed images by hash to avoid duplicates
   let modifiedHtml = contentHtml;
-  let imageIndex = 0;
   
   // First pass: Process base64 images
   const base64ImageRegex = /src="data:image\/([^;]+);base64,([^"]+)"/g;
@@ -22,27 +32,39 @@ export async function extractImagesFromContent(contentHtml, tempDir) {
   while ((match = base64ImageRegex.exec(contentHtml)) !== null) {
     const [fullMatch, imageType, base64Data] = match;
     
-    // Generate unique filename
-    const imageId = uuidv4();
-    const fileName = `image_${imageIndex}_${imageId}.${imageType}`;
-    const filePath = path.join(tempDir, fileName);
-    
-    // Convert base64 to buffer and save
+    // Convert base64 to buffer
     const imageBuffer = Buffer.from(base64Data, 'base64');
-    await fs.writeFile(filePath, imageBuffer);
     
-    // Store image file info
-    imageFiles.push({
-      fileName,
-      originalSrc: fullMatch,
-      mimeType: `image/${imageType}`,
-      size: imageBuffer.length
-    });
+    // Generate content-based hash
+    const imageHash = generateImageHash(imageBuffer);
+    
+    let fileName;
+    if (processedHashes.has(imageHash)) {
+      // Reuse existing file for identical content
+      fileName = processedHashes.get(imageHash);
+    } else {
+      // Create new file with hash-based name
+      fileName = `img_${imageHash}.${imageType}`;
+      const filePath = path.join(tempDir, fileName);
+      
+      // Save image file
+      await fs.writeFile(filePath, imageBuffer);
+      
+      // Store image file info
+      imageFiles.push({
+        fileName,
+        originalSrc: fullMatch,
+        mimeType: `image/${imageType}`,
+        size: imageBuffer.length,
+        hash: imageHash
+      });
+      
+      // Track this hash
+      processedHashes.set(imageHash, fileName);
+    }
     
     // Replace base64 src with relative path
     modifiedHtml = modifiedHtml.replace(fullMatch, `src="images/${fileName}"`);
-    
-    imageIndex++;
   }
   
   // Second pass: Process file:// URLs and custom protocol URLs
@@ -61,30 +83,41 @@ export async function extractImagesFromContent(contentHtml, tempDir) {
       // Read the file from disk
       const imageBuffer = await fs.readFile(filePath);
       
+      // Generate content-based hash
+      const imageHash = generateImageHash(imageBuffer);
+      
       // Get file extension
       const ext = path.extname(filePath).toLowerCase().substring(1);
       const imageType = ext === 'jpg' ? 'jpeg' : ext;
       
-      // Generate unique filename
-      const imageId = uuidv4();
-      const fileName = `image_${imageIndex}_${imageId}.${imageType}`;
-      const newFilePath = path.join(tempDir, fileName);
-      
-      // Copy file to temp directory
-      await fs.writeFile(newFilePath, imageBuffer);
-      
-      // Store image file info
-      imageFiles.push({
-        fileName,
-        originalSrc: fullMatch,
-        mimeType: `image/${imageType}`,
-        size: imageBuffer.length
-      });
+      let fileName;
+      if (processedHashes.has(imageHash)) {
+        // Reuse existing file for identical content
+        fileName = processedHashes.get(imageHash);
+      } else {
+        // Create new file with hash-based name
+        fileName = `img_${imageHash}.${imageType}`;
+        const newFilePath = path.join(tempDir, fileName);
+        
+        // Copy file to temp directory
+        await fs.writeFile(newFilePath, imageBuffer);
+        
+        // Store image file info
+        imageFiles.push({
+          fileName,
+          originalSrc: fullMatch,
+          mimeType: `image/${imageType}`,
+          size: imageBuffer.length,
+          hash: imageHash
+        });
+        
+        // Track this hash
+        processedHashes.set(imageHash, fileName);
+      }
       
       // Replace file:// URL with relative path
       modifiedHtml = modifiedHtml.replace(fullMatch, `src="images/${fileName}"`);
       
-      imageIndex++;
     } catch (error) {
       console.warn(`Failed to process file:// image ${filePath}:`, error);
       // Keep the original src if file can't be read
@@ -156,29 +189,36 @@ export async function createDocumentArchive(documentData, outputPath) {
     const documentJson = {
       ...documentData,
       contentHtml: processedHtml,
-      version: 2, // Increment version to indicate new format
+      version: 3, // Increment version to indicate hash-based format
       imageFiles: imageFiles.map(img => ({
         fileName: img.fileName,
         mimeType: img.mimeType,
-        size: img.size
+        size: img.size,
+        hash: img.hash // Include hash for future deduplication
       }))
     };
     
     // Create ZIP archive
     const zip = new JSZip();
     
-    // Add document.json to archive
-    zip.file('document.json', JSON.stringify(documentJson, null, 2));
+    // Add document.json to archive (compact format for smaller size)
+    zip.file('document.json', JSON.stringify(documentJson));
     
-    // Add image files to archive
+    // Add image files to archive (only unique ones due to hash-based deduplication)
     for (const imageFile of imageFiles) {
       const imagePath = path.join(imagesDir, imageFile.fileName);
       const imageBuffer = await fs.readFile(imagePath);
       zip.file(`images/${imageFile.fileName}`, imageBuffer);
     }
     
-    // Generate and save archive
-    const archiveBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+    // Generate and save archive with maximum compression
+    const archiveBuffer = await zip.generateAsync({ 
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: {
+        level: 9 // Maximum compression level (0-9, where 9 is best compression)
+      }
+    });
     await fs.writeFile(outputPath, archiveBuffer);
     
   } finally {
