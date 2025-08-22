@@ -189,3 +189,4 @@ find ~/Documents/Researcher/Memory\ Reports/ -name "memory-report-*.txt" -mtime 
 5. **Monitor during typical usage** - Don't just test empty app
 
 The memory reporting system helps you identify exactly where your app is consuming memory and track improvements over time!
+

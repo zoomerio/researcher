@@ -48,9 +48,10 @@ class MemoryConfig {
       autoplayPolicy: 'user-gesture-required',
       disableBlinkFeatures: 'Auxclick',
       
-      // Graphics optimizations
-      webgl: true, // Keep for Plotly charts
+      // Graphics optimizations - disabled for maximum memory savings
+      webgl: false, // Disable WebGL to save memory (may affect Plotly performance)
       acceleratedGraphics: false, // Disable GPU acceleration to save memory
+      hardwareAcceleration: false, // Explicitly disable hardware acceleration
       
       // Disable unnecessary web features
       webSecurity: false, // Allow local files in dev
@@ -96,12 +97,12 @@ class MemoryConfig {
       '--single-threaded-gc', // Use single-threaded GC for lower memory overhead
     ];
 
-    // Adjust heap size based on system memory and window type - more aggressive limits
+    // Adjust heap size based on system memory and window type - even more aggressive limits
     let heapSize;
     if (isChildWindow) {
-      heapSize = this.isLowMemorySystem ? 64 : 128; // Reduced from 128/256
+      heapSize = this.isLowMemorySystem ? 32 : 64; // Further reduced for child windows
     } else {
-      heapSize = this.isLowMemorySystem ? 128 : 256; // Reduced from 256/512
+      heapSize = this.isLowMemorySystem ? 64 : 128; // Further reduced for main window
     }
 
     const memoryFlags = [
@@ -248,8 +249,8 @@ class MemoryConfig {
     const arch = process.arch;
 
     const optimizations = {
-      // Base optimizations for all systems
-      disableHardwareAcceleration: this.isLowMemorySystem,
+      // Base optimizations for all systems - always disable hardware acceleration
+      disableHardwareAcceleration: true, // Always disable for memory savings
       enableBackgroundThrottling: !this.isDevelopment,
       
       // Platform-specific optimizations

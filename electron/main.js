@@ -28,6 +28,29 @@ const imageHashToTempPath = new Map(); // Track image hash to temp file mapping
 const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
+// Memory and performance optimizations
+console.log('[Electron] Applying memory optimizations...');
+
+// Disable hardware acceleration to reduce memory usage
+app.disableHardwareAcceleration();
+console.log('[Electron] Hardware acceleration disabled');
+
+// Additional Chromium flags for memory optimization
+app.commandLine.appendSwitch('--disable-gpu');
+app.commandLine.appendSwitch('--disable-gpu-compositing');
+app.commandLine.appendSwitch('--disable-gpu-rasterization');
+app.commandLine.appendSwitch('--disable-gpu-sandbox');
+app.commandLine.appendSwitch('--disable-software-rasterizer');
+app.commandLine.appendSwitch('--disable-background-timer-throttling');
+app.commandLine.appendSwitch('--disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('--disable-renderer-backgrounding');
+app.commandLine.appendSwitch('--disable-features', 'TranslateUI,BlinkGenPropertyTrees');
+app.commandLine.appendSwitch('--disable-ipc-flooding-protection');
+app.commandLine.appendSwitch('--disable-dev-shm-usage');
+app.commandLine.appendSwitch('--memory-pressure-off');
+app.commandLine.appendSwitch('--max_old_space_size', '256');
+app.commandLine.appendSwitch('--optimize-for-size');
+
 // Enable garbage collection for main process
 if (isDev && !global.gc) {
   console.warn('[Electron] Garbage collection not available. Restart with --expose-gc flag for full memory optimization.');
@@ -38,6 +61,112 @@ function generateImageHash(imageBuffer) {
   return crypto.createHash('sha256').update(imageBuffer).digest('hex').substring(0, 16);
 }
 
+// Memory optimization for drawing mode
+function setupDrawingModeMemoryOptimization() {
+  console.log('[Electron] Setting up drawing mode memory optimization...');
+  
+  // Monitor memory usage more frequently when drawing mode is active
+  let drawingModeActive = false;
+  let memoryMonitorInterval = null;
+  
+  // Listen for drawing mode events from renderer
+  ipcMain.on('drawing-mode:activated', () => {
+    console.log('[Electron] Drawing mode activated - enabling aggressive memory management');
+    drawingModeActive = true;
+    
+    // Start aggressive memory monitoring
+    if (memoryMonitorInterval) clearInterval(memoryMonitorInterval);
+    memoryMonitorInterval = setInterval(() => {
+      const usage = process.memoryUsage();
+      const heapUsedMB = usage.heapUsed / 1024 / 1024;
+      
+      console.log(`[Electron] Drawing mode memory: ${heapUsedMB.toFixed(2)}MB heap, ${(usage.rss / 1024 / 1024).toFixed(2)}MB RSS`);
+      
+      // Force GC more aggressively in drawing mode
+      if (heapUsedMB > 150 && typeof global.gc === 'function') {
+        console.log('[Electron] Drawing mode: forcing garbage collection due to high memory usage');
+        global.gc();
+        
+        // Also trigger renderer GC
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('memory:force-gc');
+        }
+      }
+      
+      // Clear image cache if memory is too high
+      if (heapUsedMB > 200) {
+        console.log('[Electron] Drawing mode: clearing image cache due to critical memory usage');
+        clearImageCache();
+      }
+    }, 5000); // Check every 5 seconds in drawing mode
+  });
+  
+  ipcMain.on('drawing-mode:deactivated', () => {
+    console.log('[Electron] Drawing mode deactivated - reducing memory monitoring');
+    drawingModeActive = false;
+    
+    // Reduce monitoring frequency
+    if (memoryMonitorInterval) {
+      clearInterval(memoryMonitorInterval);
+      memoryMonitorInterval = setInterval(() => {
+        const usage = process.memoryUsage();
+        const heapUsedMB = usage.heapUsed / 1024 / 1024;
+        
+        if (heapUsedMB > 100 && typeof global.gc === 'function') {
+          global.gc();
+        }
+      }, 30000); // Check every 30 seconds when not drawing
+    }
+    
+    // Force cleanup after drawing mode
+    setTimeout(() => {
+      if (typeof global.gc === 'function') {
+        global.gc();
+        console.log('[Electron] Post-drawing cleanup GC completed');
+      }
+    }, 1000);
+  });
+}
+
+// Clear image cache to free memory
+function clearImageCache() {
+  console.log('[Electron] Clearing image cache...');
+  
+  // Clear the image hash to temp path mapping
+  const clearedCount = imageHashToTempPath.size;
+  imageHashToTempPath.clear();
+  
+  // Don't clean up temp directories immediately - they might still be in use
+  // Only clean up directories that are older than 5 minutes
+  const now = Date.now();
+  const fiveMinutesAgo = now - (5 * 60 * 1000);
+  
+  for (const tempDir of documentTempDirs) {
+    fs.stat(tempDir).then(stats => {
+      if (stats.mtime.getTime() < fiveMinutesAgo) {
+        console.log('[Electron] Cleaning up old temp directory:', tempDir);
+        cleanupTempDirectory(tempDir).catch(err => {
+          console.warn('[Electron] Error cleaning temp directory:', err.message);
+        });
+        documentTempDirs.delete(tempDir);
+      } else {
+        console.log('[Electron] Keeping recent temp directory:', tempDir);
+      }
+    }).catch(err => {
+      // Directory doesn't exist, remove from tracking
+      console.log('[Electron] Temp directory no longer exists, removing from tracking:', tempDir);
+      documentTempDirs.delete(tempDir);
+    });
+  }
+  
+  console.log(`[Electron] Cleared ${clearedCount} cached images`);
+  
+  // Force garbage collection after cache clear
+  if (typeof global.gc === 'function') {
+    global.gc();
+  }
+}
+
 function createWindow() {
   const config = memoryConfig.getCompleteConfig();
   
@@ -46,13 +175,31 @@ function createWindow() {
     height: 900,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
-      webSecurity: config.webPreferences.main.webSecurity, // Use config value
-      ...config.webPreferences.main
+      webSecurity: false, // Disable web security to allow custom protocols
+      ...config.webPreferences.main,
+      // Additional memory optimizations for drawing mode
+      backgroundThrottling: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      // Disable hardware acceleration in renderer
+      hardwareAcceleration: false,
+      // Limit memory usage
+      v8CacheOptions: 'none',
+      // Disable unnecessary features
+      plugins: false,
+      webgl: false, // Disable WebGL to save memory (may affect Plotly)
+      experimentalFeatures: false,
+      // Memory-specific optimizations
+      partition: 'persist:main', // Use persistent partition for better memory management
+      // Allow custom protocols
+      allowRunningInsecureContent: true,
     },
     show: false,
     // Additional memory optimizations
     useContentSize: true, // Use content size instead of window size
     enableLargerThanScreen: false, // Prevent oversized windows
+    thickFrame: false, // Reduce window chrome memory usage
     ...config.window.main
   });
 
@@ -91,6 +238,9 @@ function createWindow() {
         console.log('[Electron] Post-load garbage collection completed');
       }, 2000);
     }
+    
+    // Set up aggressive memory management for drawing mode
+    setupDrawingModeMemoryOptimization();
   });
   mainWindow.on('focus', () => { 
     lastFocusedWindow = mainWindow; 
@@ -246,6 +396,24 @@ function buildMenu() {
   Menu.setApplicationMenu(menu);
 }
 
+// Register custom protocol scheme before app is ready
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'rsrch-image',
+    privileges: {
+      secure: true,
+      standard: true, // Changed to true to make it behave more like http
+      bypassCSP: true, // Allow bypassing CSP
+      allowServiceWorkers: false,
+      supportFetchAPI: true, // Enable fetch API support
+      corsEnabled: true, // Enable CORS
+      stream: false
+    }
+  }
+]);
+
+console.log('[Electron] Custom protocol scheme registered');
+
 // Single instance lock to handle opening files on Windows
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -276,15 +444,109 @@ app.on('open-file', (event, filePath) => {
   }
 });
 
+// Register custom protocol before app is ready
 app.whenReady().then(() => {
-  // Register custom protocol for serving local images
-  protocol.registerFileProtocol('rsrch-image', (request, callback) => {
-    const url = request.url.substr('rsrch-image://'.length);
-    // Remove cache-busting parameters (everything after ?)
-    const urlWithoutParams = url.split('?')[0];
-    const decodedPath = decodeURIComponent(urlWithoutParams);
-    callback({ path: decodedPath });
+  // Register custom protocol for serving local images using buffer protocol
+  const protocolRegistered = protocol.registerBufferProtocol('rsrch-image', (request, callback) => {
+    try {
+      const url = request.url.replace('rsrch-image://', '');
+      // Remove cache-busting parameters (everything after ?)
+      const urlWithoutParams = url.split('?')[0];
+      const decodedPath = decodeURIComponent(urlWithoutParams);
+      
+      console.log('[Electron] Protocol request:', request.url, '-> decoded:', decodedPath);
+      
+      // Validate the path exists and is safe
+      if (!decodedPath || decodedPath.includes('..')) {
+        console.error('[Electron] Invalid path in protocol request:', decodedPath);
+        callback({ error: -6 }); // FILE_NOT_FOUND
+        return;
+      }
+      
+      // Handle the async operations properly
+      (async () => {
+        try {
+          // Check if file exists
+          await fs.access(decodedPath);
+          console.log('[Electron] File exists, serving:', decodedPath);
+          
+          // Get file stats for additional info
+          const stats = await fs.stat(decodedPath);
+          console.log('[Electron] File stats:', {
+            size: stats.size,
+            modified: stats.mtime,
+            isFile: stats.isFile()
+          });
+          
+          // Determine MIME type based on file extension
+          const ext = path.extname(decodedPath).toLowerCase();
+          let mimeType = 'application/octet-stream';
+          
+          switch (ext) {
+            case '.png':
+              mimeType = 'image/png';
+              break;
+            case '.jpg':
+            case '.jpeg':
+              mimeType = 'image/jpeg';
+              break;
+            case '.gif':
+              mimeType = 'image/gif';
+              break;
+            case '.svg':
+              mimeType = 'image/svg+xml';
+              break;
+            case '.webp':
+              mimeType = 'image/webp';
+              break;
+            case '.bmp':
+              mimeType = 'image/bmp';
+              break;
+          }
+          
+          console.log('[Electron] Serving file with MIME type:', mimeType);
+          
+          // Read the file and serve it as a buffer
+          const fileBuffer = await fs.readFile(decodedPath);
+          console.log('[Electron] Read file buffer, size:', fileBuffer.length);
+          
+          callback({
+            mimeType: mimeType,
+            data: fileBuffer
+          });
+        } catch (error) {
+          console.error('[Electron] File not found:', decodedPath);
+          console.error('[Electron] Error details:', error.message);
+          
+          // Try to check if the directory exists
+          const dir = path.dirname(decodedPath);
+          try {
+            const dirExists = await fs.access(dir).then(() => true).catch(() => false);
+            console.log('[Electron] Parent directory exists:', dirExists, dir);
+            
+            if (dirExists) {
+              // List files in the directory to see what's there
+              const files = await fs.readdir(dir);
+              console.log('[Electron] Files in directory:', files);
+            }
+          } catch (dirError) {
+            console.error('[Electron] Error checking directory:', dirError.message);
+          }
+          
+          callback({ error: -6 }); // FILE_NOT_FOUND
+        }
+      })();
+    } catch (error) {
+      console.error('[Electron] Error in protocol handler:', error);
+      callback({ error: -2 }); // GENERIC_FAILURE
+    }
   });
+  
+  if (protocolRegistered) {
+    console.log('[Electron] rsrch-image buffer protocol registered successfully');
+  } else {
+    console.error('[Electron] Failed to register rsrch-image buffer protocol');
+  }
 
   createWindow();
   buildMenu();
@@ -307,6 +569,7 @@ function openChildWindow(initialPayload) {
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       webSecurity: false, // Allow custom protocols
+      allowRunningInsecureContent: true,
       ...config.webPreferences.child
     },
     parent: mainWindow || undefined,
@@ -644,6 +907,14 @@ ipcMain.handle('dialog:open-image', async () => {
     const normalizedPath = tempPath.replace(/\\/g, '/');
     const customUrl = `rsrch-image://${encodeURIComponent(normalizedPath)}`;
     
+    console.log('[Electron] Created temp image:', {
+      originalPath,
+      tempPath,
+      normalizedPath,
+      customUrl,
+      fileExists: await fs.access(tempPath).then(() => true).catch(() => false)
+    });
+    
     return { 
       canceled: false, 
       dataUrl: customUrl, // Use custom protocol URL to temp copy
@@ -852,6 +1123,46 @@ ipcMain.handle('process:get-stats', async () => {
     return { success: true, data: stats };
   } catch (error) {
     console.error('[Electron] Failed to get process stats:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Additional memory management IPC handlers
+ipcMain.handle('memory:clear-cache', async () => {
+  try {
+    clearImageCache();
+    return { success: true, message: 'Cache cleared successfully' };
+  } catch (error) {
+    console.error('[Electron] Failed to clear cache:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('memory:get-detailed-usage', async () => {
+  try {
+    const memoryUsage = process.memoryUsage();
+    const cpuUsage = process.cpuUsage();
+    
+    return {
+      success: true,
+      data: {
+        memory: {
+          rss: memoryUsage.rss,
+          heapTotal: memoryUsage.heapTotal,
+          heapUsed: memoryUsage.heapUsed,
+          external: memoryUsage.external,
+          arrayBuffers: memoryUsage.arrayBuffers,
+        },
+        cpu: cpuUsage,
+        cacheInfo: {
+          imagesCached: imageHashToTempPath.size,
+          tempDirs: documentTempDirs.size,
+        },
+        timestamp: Date.now()
+      }
+    };
+  } catch (error) {
+    console.error('[Electron] Failed to get detailed memory usage:', error);
     return { success: false, error: error.message };
   }
 });

@@ -348,3 +348,4 @@ export const OptimizedApp: React.FC = () => {
 
 // Export memoized app component
 export default memoizeComponent(OptimizedApp);
+

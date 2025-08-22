@@ -96,3 +96,4 @@ export const ScientificStarterKit = StarterKit.configure({
 });
 
 export default OptimizedStarterKit;
+

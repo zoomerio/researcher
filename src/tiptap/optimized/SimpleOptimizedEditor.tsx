@@ -119,3 +119,4 @@ export const SimpleOptimizedEditor: React.FC<SimpleOptimizedEditorProps> = ({
 };
 
 export default SimpleOptimizedEditor;
+

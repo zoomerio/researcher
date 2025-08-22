@@ -2202,6 +2202,7 @@ const ImagesBar: React.FC<{ editor: any; activeTool: string; selectedIllustratio
           // Compress image before inserting
           const compressedDataUrl = await compressImage((result as any).dataUrl)
           
+          console.log('[App] Inserting image with src:', compressedDataUrl.substring(0, 100) + '...');
           editor?.chain().focus().insertIllustration({ 
             src: compressedDataUrl,
             width: insertWidth,
@@ -2237,6 +2238,7 @@ const ImagesBar: React.FC<{ editor: any; activeTool: string; selectedIllustratio
         });
         
         if (result.success) {
+          console.log('[App] Inserting drawing with custom URL:', result.customUrl);
           editor?.chain().focus().insertIllustration({ 
             src: result.customUrl,
             width: 600,
@@ -2247,6 +2249,7 @@ const ImagesBar: React.FC<{ editor: any; activeTool: string; selectedIllustratio
         } else {
           console.error('Failed to create temp drawing:', result.error);
           // Fallback to base64 if temp creation fails
+          console.log('[App] Fallback to base64 for drawing');
           editor?.chain().focus().insertIllustration({ 
             src: dataUrl,
             width: 600,

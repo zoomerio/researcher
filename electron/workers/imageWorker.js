@@ -349,3 +349,4 @@ process.on('SIGINT', async () => {
 });
 
 console.log('[ImageWorker] Worker process started');
+

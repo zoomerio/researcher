@@ -1536,7 +1536,7 @@ const IllustrationNodeView = React.memo(({ node, updateAttributes, deleteNode, g
             src={src}
             alt={alt || ''}
             title={title || ''}
-            loading="lazy"
+            loading={src?.startsWith('rsrch-image://') ? 'eager' : 'lazy'}
             decoding="async"
             style={{
               width: width ? `${width}px` : 'auto',
@@ -1548,10 +1548,15 @@ const IllustrationNodeView = React.memo(({ node, updateAttributes, deleteNode, g
             }}
             draggable={false}
             onLoad={() => {
+              console.log('[IllustrationNode] Image loaded successfully:', src);
               // Optimize image after load if it's too large
               if (imageRef.current && src && src.startsWith('data:')) {
                 optimizeImageIfNeeded(imageRef.current, src, updateAttributes)
               }
+            }}
+            onError={(e) => {
+              console.error('[IllustrationNode] Image failed to load:', src, e);
+              console.log('[IllustrationNode] Image element:', e.target);
             }}
           />
 

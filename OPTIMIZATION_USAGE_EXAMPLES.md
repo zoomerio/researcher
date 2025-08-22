@@ -193,3 +193,4 @@ const editor = useEditor({
 4. **Performance Testing**: Benchmark with large documents
 
 The current optimizations provide significant memory improvements while maintaining full functionality and backward compatibility.
+

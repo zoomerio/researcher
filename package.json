@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Scientific text editor built with React + Electron",
+  "author": "Researcher Team",
   "main": "electron/main.js",
   "type": "module",
   "scripts": {
@@ -29,9 +30,16 @@
       "main": "electron/main.js"
     },
     "asar": true,
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
       ],
       "fileAssociations": [
         {

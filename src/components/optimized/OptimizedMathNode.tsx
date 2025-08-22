@@ -232,3 +232,4 @@ export const OptimizedMathNode = memoizeComponent(
   OptimizedMathNodeView,
   nodePropsEqual
 );
+
