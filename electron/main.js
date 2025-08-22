@@ -10,6 +10,9 @@ import {
   isValidDocumentArchive,
   cleanupTempDirectory
 } from './documentUtils.js';
+import { childProcessManager } from './childProcessManager.js';
+import { processPriorityManager } from './processPriorityManager.js';
+import { memoryConfig } from './memoryConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,23 +28,32 @@ const imageHashToTempPath = new Map(); // Track image hash to temp file mapping
 const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
+// Enable garbage collection for main process
+if (isDev && !global.gc) {
+  console.warn('[Electron] Garbage collection not available. Restart with --expose-gc flag for full memory optimization.');
+}
+
 // Helper function to generate image hash
 function generateImageHash(imageBuffer) {
   return crypto.createHash('sha256').update(imageBuffer).digest('hex').substring(0, 16);
 }
 
 function createWindow() {
+  const config = memoryConfig.getCompleteConfig();
+  
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 900,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      webSecurity: false, // Allow custom protocols
+      webSecurity: config.webPreferences.main.webSecurity, // Use config value
+      ...config.webPreferences.main
     },
     show: false,
+    // Additional memory optimizations
+    useContentSize: true, // Use content size instead of window size
+    enableLargerThanScreen: false, // Prevent oversized windows
+    ...config.window.main
   });
 
   mainWindow.once('ready-to-show', () => {
@@ -71,8 +83,43 @@ function createWindow() {
   });
   mainWindow.webContents.on('did-finish-load', () => {
     console.log('[Electron] did-finish-load');
+    
+    // Force garbage collection after page load
+    if (typeof global.gc === 'function') {
+      setTimeout(() => {
+        global.gc();
+        console.log('[Electron] Post-load garbage collection completed');
+      }, 2000);
+    }
   });
-  mainWindow.on('focus', () => { lastFocusedWindow = mainWindow; });
+  mainWindow.on('focus', () => { 
+    lastFocusedWindow = mainWindow; 
+    try {
+      processPriorityManager?.recordActivity();
+    } catch (error) {
+      console.warn('[Electron] Error recording activity:', error.message);
+    }
+  });
+  
+  // Track user activity for priority management
+  mainWindow.webContents.on('did-finish-load', () => {
+    try {
+      processPriorityManager?.recordActivity();
+    } catch (error) {
+      console.warn('[Electron] Error recording activity:', error.message);
+    }
+  });
+  
+  // Track various user interactions
+  ['before-input-event', 'dom-ready'].forEach(event => {
+    mainWindow.webContents.on(event, () => {
+      try {
+        processPriorityManager?.recordActivity();
+      } catch (error) {
+        console.warn('[Electron] Error recording activity:', error.message);
+      }
+    });
+  });
 }
 
 function buildMenu() {
@@ -229,6 +276,10 @@ app.on('open-file', (event, filePath) => {
   }
 });
 
+// Disable hardware acceleration BEFORE app is ready
+console.log('[Electron] Disabling hardware acceleration for memory optimization');
+app.disableHardwareAcceleration();
+
 app.whenReady().then(() => {
   // Register custom protocol for serving local images
   protocol.registerFileProtocol('rsrch-image', (request, callback) => {
@@ -252,17 +303,18 @@ app.on('window-all-closed', () => {
 });
 
 function openChildWindow(initialPayload) {
+  const config = memoryConfig.getCompleteConfig();
+  
   const win = new BrowserWindow({
     width: 1000,
     height: 800,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
       webSecurity: false, // Allow custom protocols
+      ...config.webPreferences.child
     },
     parent: mainWindow || undefined,
+    ...config.window.child
   });
   childWindows.add(win);
   win.on('closed', () => childWindows.delete(win));
@@ -516,6 +568,23 @@ ipcMain.handle('window:close-self', async (event) => {
 
 // Ensure child windows close when main closes
 app.on('before-quit', async () => {
+  console.log('[Electron] App shutting down, cleaning up...');
+  
+  // Shutdown child process manager
+  try {
+    await childProcessManager.shutdown();
+  } catch (error) {
+    console.error('[Electron] Error shutting down child processes:', error);
+  }
+  
+  // Shutdown process priority manager
+  try {
+    processPriorityManager?.shutdown();
+  } catch (error) {
+    console.error('[Electron] Error shutting down process priority manager:', error);
+  }
+  
+  // Close child windows
   for (const w of Array.from(childWindows)) {
     try { w.destroy(); } catch {}
   }
@@ -527,6 +596,8 @@ app.on('before-quit', async () => {
   }
   documentTempDirs.clear();
   imageHashToTempPath.clear();
+  
+  console.log('[Electron] Cleanup completed');
 });
 
 // External drag events (for future richer DnD between windows)
@@ -606,8 +677,209 @@ ipcMain.handle('document:cleanup-temp', async (_event, tempDir) => {
   return { ok: true };
 });
 
+// Memory monitoring IPC handlers
+ipcMain.handle('memory:get-usage', async () => {
+  const memoryUsage = process.memoryUsage();
+  return {
+    rss: memoryUsage.rss,
+    heapTotal: memoryUsage.heapTotal,
+    heapUsed: memoryUsage.heapUsed,
+    external: memoryUsage.external,
+    arrayBuffers: memoryUsage.arrayBuffers,
+    timestamp: Date.now()
+  };
+});
+
+ipcMain.handle('memory:force-gc', async () => {
+  try {
+    if (typeof global.gc === 'function') {
+      const memBefore = process.memoryUsage();
+      console.log('[Electron] Forcing garbage collection...');
+      global.gc();
+      const memAfter = process.memoryUsage();
+      const heapReduced = Math.round((memBefore.heapUsed - memAfter.heapUsed) / 1024 / 1024);
+      console.log(`[Electron] Manual GC completed - freed ${heapReduced}MB heap memory`);
+      return { 
+        success: true, 
+        message: `Garbage collection completed - freed ${heapReduced}MB`,
+        memoryBefore: memBefore,
+        memoryAfter: memAfter
+      };
+    } else {
+      console.warn('[Electron] Garbage collection not available. Restart with --expose-gc flag for full memory optimization.');
+      return { success: false, message: 'GC not available - restart with --expose-gc flag' };
+    }
+  } catch (error) {
+    console.error('[Electron] Error forcing garbage collection:', error);
+    return { success: false, message: error.message };
+  }
+});
+
+// Log memory usage periodically in main process
+let memoryLogInterval = null;
+function startMemoryLogging() {
+  if (memoryLogInterval) return;
+  
+  console.log('[Electron] Starting memory monitoring...');
+
+// Test V8 flags
+console.log('[Electron] Testing V8 flags...');
+console.log(`[Electron] Node.js version: ${process.version}`);
+console.log(`[Electron] Process execArgv:`, process.execArgv);
+
+// Test --expose-gc flag
+if (typeof global.gc === 'function') {
+  console.log('[Electron] ✅ global.gc is available - --expose-gc flag working');
+  try {
+    const memBefore = process.memoryUsage();
+    global.gc();
+    const memAfter = process.memoryUsage();
+    console.log(`[Electron] Manual GC test: ${Math.round(memBefore.heapUsed/1024/1024)}MB → ${Math.round(memAfter.heapUsed/1024/1024)}MB`);
+  } catch (error) {
+    console.log('[Electron] ❌ Error testing manual GC:', error.message);
+  }
+} else {
+  console.log('[Electron] ❌ global.gc NOT available - --expose-gc flag not working');
+}
+
+// Test heap size limit
+(async () => {
+  try {
+    const v8 = await import('v8');
+    const heapStats = v8.getHeapStatistics();
+    const heapLimitMB = Math.round(heapStats.heap_size_limit / 1024 / 1024);
+    console.log(`[Electron] Heap size limit: ${heapLimitMB}MB`);
+    if (heapLimitMB < 600) {
+      console.log('[Electron] ✅ --max-old-space-size flag appears to be working');
+    } else {
+      console.log('[Electron] ❌ --max-old-space-size flag may not be working');
+    }
+  } catch (error) {
+    console.log('[Electron] Error checking heap statistics:', error.message);
+  }
+})();
+  memoryLogInterval = setInterval(() => {
+    const usage = process.memoryUsage();
+    console.log(`[Electron Memory] RSS: ${(usage.rss / 1024 / 1024).toFixed(2)}MB, Heap: ${(usage.heapUsed / 1024 / 1024).toFixed(2)}MB / ${(usage.heapTotal / 1024 / 1024).toFixed(2)}MB`);
+    
+    // More aggressive memory management - force GC if heap usage is high
+    const heapUsageMB = usage.heapUsed / 1024 / 1024;
+    const rssMB = usage.rss / 1024 / 1024;
+    
+    // Force GC at lower thresholds and monitor RSS memory
+    if ((heapUsageMB > 80 || rssMB > 300) && typeof global.gc === 'function') {
+      console.log(`[Electron] High memory usage detected (Heap: ${heapUsageMB.toFixed(2)}MB, RSS: ${rssMB.toFixed(2)}MB), forcing garbage collection...`);
+      global.gc();
+      
+      // Also trigger GC in all renderer processes
+      BrowserWindow.getAllWindows().forEach(win => {
+        try {
+          win.webContents.executeJavaScript(`
+            if (window.gc) {
+              window.gc();
+              console.log('[Renderer] Manual GC triggered from main process');
+            }
+          `).catch(() => {}); // Ignore errors
+        } catch (error) {
+          // Ignore errors from closed windows
+        }
+      });
+      
+      // Log memory after GC
+      setTimeout(() => {
+        const afterGC = process.memoryUsage();
+        const freedHeap = Math.round((usage.heapUsed - afterGC.heapUsed) / 1024 / 1024);
+        const freedRSS = Math.round((usage.rss - afterGC.rss) / 1024 / 1024);
+        console.log(`[Electron] GC completed - freed ${freedHeap}MB heap, ${freedRSS}MB RSS. New: ${(afterGC.heapUsed / 1024 / 1024).toFixed(2)}MB heap, ${(afterGC.rss / 1024 / 1024).toFixed(2)}MB RSS`);
+      }, 100);
+    }
+  }, 15000); // Every 15 seconds (more frequent)
+}
+
+function stopMemoryLogging() {
+  if (memoryLogInterval) {
+    clearInterval(memoryLogInterval);
+    memoryLogInterval = null;
+    console.log('[Electron] Stopped memory monitoring');
+  }
+}
+
+// Start memory logging in development
+if (isDev) {
+  startMemoryLogging();
+}
+
+// Save memory report to file
+ipcMain.handle('memory:save-report', async (_event, { filename, reportText, reportData }) => {
+  try {
+    const reportsDir = path.join(os.homedir(), 'Documents', 'Researcher', 'Memory Reports');
+    
+    // Create directory if it doesn't exist
+    await fs.mkdir(reportsDir, { recursive: true });
+    
+    // Save text report
+    const textPath = path.join(reportsDir, `${filename}.txt`);
+    await fs.writeFile(textPath, reportText, 'utf-8');
+    
+    // Save JSON report
+    const jsonPath = path.join(reportsDir, `${filename}.json`);
+    await fs.writeFile(jsonPath, reportData, 'utf-8');
+    
+    console.log(`[Electron] Memory reports saved to: ${reportsDir}`);
+    
+    return {
+      success: true,
+      textPath,
+      jsonPath,
+      directory: reportsDir
+    };
+  } catch (error) {
+    console.error('[Electron] Failed to save memory report:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+// Child process operations for heavy tasks
+ipcMain.handle('process:document-operation', async (_event, { operation, data }) => {
+  try {
+    console.log(`[Electron] Starting document operation: ${operation}`);
+    const result = await childProcessManager.executeTask('document', { operation, data });
+    console.log(`[Electron] Document operation completed: ${operation}`);
+    return { success: true, data: result };
+  } catch (error) {
+    console.error(`[Electron] Document operation failed: ${operation}`, error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('process:image-operation', async (_event, { operation, data }) => {
+  try {
+    console.log(`[Electron] Starting image operation: ${operation}`);
+    const result = await childProcessManager.executeTask('image', { operation, data });
+    console.log(`[Electron] Image operation completed: ${operation}`);
+    return { success: true, data: result };
+  } catch (error) {
+    console.error(`[Electron] Image operation failed: ${operation}`, error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Get child process statistics
+ipcMain.handle('process:get-stats', async () => {
+  try {
+    const stats = childProcessManager.getProcessStats();
+    return { success: true, data: stats };
+  } catch (error) {
+    console.error('[Electron] Failed to get process stats:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Create temporary file from image data for editing
-ipcMain.handle('image:create-temp', async (_event, { imageData, originalPath, mimeType }) => {
+ipcMain.handle('image:create-temp', async (_event, { imageData, originalPath, mimeType, uniqueId }) => {
   try {
     let imageBuffer;
     let fileName;
@@ -633,54 +905,70 @@ ipcMain.handle('image:create-temp', async (_event, { imageData, originalPath, mi
     
     // Generate content-based hash
     const imageHash = generateImageHash(imageBuffer);
+    const timestamp = Date.now();
+    const sessionId = Math.random().toString(36).substr(2, 9);
     
-    // Check if we already have a temp file for this image content
-    if (imageHashToTempPath.has(imageHash)) {
-      const existingTempPath = imageHashToTempPath.get(imageHash);
-      try {
-        // Verify the existing file still exists
-        await fs.access(existingTempPath);
-        const normalizedPath = existingTempPath.replace(/\\/g, '/');
-        const customUrl = `rsrch-image://${encodeURIComponent(normalizedPath)}`;
-        
-        return {
-          success: true,
-          tempPath: existingTempPath,
-          customUrl,
-          tempDir: path.dirname(existingTempPath),
-          reused: true
-        };
-      } catch (error) {
-        // File no longer exists, remove from tracking
-        imageHashToTempPath.delete(imageHash);
+    // For uniqueId (new drawings), always create new temp files to avoid path reuse
+    if (uniqueId) {
+      console.log(`[Temp Image] Creating unique temp image: ${uniqueId}`);
+      // Always create new files for new drawings/unique content
+    } else {
+      // Check if we already have a temp file for this image content (only for existing images)
+      if (imageHashToTempPath.has(imageHash)) {
+        const existingTempPath = imageHashToTempPath.get(imageHash);
+        try {
+          // Verify the existing file still exists
+          await fs.access(existingTempPath);
+          const normalizedPath = existingTempPath.replace(/\\/g, '/');
+          const customUrl = `rsrch-image://${encodeURIComponent(normalizedPath)}`;
+          
+          console.log(`[Temp Image] Reusing existing temp file for hash: ${imageHash}`);
+          return {
+            success: true,
+            tempPath: existingTempPath,
+            customUrl,
+            tempDir: path.dirname(existingTempPath),
+            reused: true
+          };
+        } catch (error) {
+          // File no longer exists, remove from tracking
+          imageHashToTempPath.delete(imageHash);
+        }
       }
     }
     
-    // Create new temp file
-    const tempDir = path.join(os.tmpdir(), `rsrch_image_edit_${Date.now()}_${imageHash}`);
+    // Create new temp file with timestamp for uniqueness
+    const tempDir = path.join(os.tmpdir(), `rsrch_image_${timestamp}_${sessionId}`);
     await fs.mkdir(tempDir, { recursive: true });
     
-    // Use hash-based filename for consistency
+    // Use timestamp-based filename for uniqueness
     const ext = fileName.split('.').pop() || 'png';
-    const hashBasedFileName = `img_${imageHash}.${ext}`;
-    const tempFilePath = path.join(tempDir, hashBasedFileName);
+    const uniqueFileName = uniqueId 
+      ? `${uniqueId}.${ext}` 
+      : `img_${timestamp}_${sessionId}.${ext}`;
+    const tempFilePath = path.join(tempDir, uniqueFileName);
     
     await fs.writeFile(tempFilePath, imageBuffer);
     
-    // Track temp directory and hash mapping
+    // Track temp directory and hash mapping (only if not uniqueId)
     documentTempDirs.add(tempDir);
-    imageHashToTempPath.set(imageHash, tempFilePath);
+    if (!uniqueId) {
+      imageHashToTempPath.set(imageHash, tempFilePath);
+    }
     
     // Return custom protocol URL for the temp file
     const normalizedPath = tempFilePath.replace(/\\/g, '/');
     const customUrl = `rsrch-image://${encodeURIComponent(normalizedPath)}`;
+    
+    console.log(`[Temp Image] Created new temp file: ${uniqueFileName}`);
     
     return {
       success: true,
       tempPath: tempFilePath,
       customUrl,
       tempDir,
-      hash: imageHash
+      hash: imageHash,
+      uniqueId: uniqueId || `${timestamp}_${sessionId}`
     };
   } catch (error) {
     console.error('Error creating temp image:', error);

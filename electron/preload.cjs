@@ -57,6 +57,14 @@ const api = {
   cleanupDocumentTemp: (tempDir) => ipcRenderer.invoke('document:cleanup-temp', tempDir),
   createTempImage: (payload) => ipcRenderer.invoke('image:create-temp', payload),
   saveTempImageEdit: (payload) => ipcRenderer.invoke('image:save-temp-edit', payload),
+  // Memory monitoring
+  getMemoryUsage: () => ipcRenderer.invoke('memory:get-usage'),
+  forceGarbageCollection: () => ipcRenderer.invoke('memory:force-gc'),
+  saveMemoryReport: (payload) => ipcRenderer.invoke('memory:save-report', payload),
+  // Child process operations
+  executeDocumentOperation: (operation, data) => ipcRenderer.invoke('process:document-operation', { operation, data }),
+  executeImageOperation: (operation, data) => ipcRenderer.invoke('process:image-operation', { operation, data }),
+  getProcessStats: () => ipcRenderer.invoke('process:get-stats'),
 };
 
 contextBridge.exposeInMainWorld('api', api);

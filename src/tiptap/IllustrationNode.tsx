@@ -3,6 +3,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
 import React, { useRef, useState, useEffect, useCallback, Component, ErrorInfo } from 'react'
 import { createPortal } from 'react-dom'
 
+
 interface Measurement {
   id: string
   x1: number
@@ -139,9 +140,23 @@ const DrawingCanvas: React.FC<{
   const [brushSize, setBrushSize] = useState(5)
   const [brushColor, setBrushColor] = useState('#000000')
 
-  // Use original image dimensions for canvas to avoid white stripes
-  const canvasWidth = width
-  const canvasHeight = height
+  // Maintain original image resolution for quality preservation
+  // Only scale down if the image is extremely large (beyond reasonable editing size)
+  const MAX_CANVAS_WIDTH = 4096  // Increased limit for quality
+  const MAX_CANVAS_HEIGHT = 4096
+  
+  // Only scale down if absolutely necessary for memory
+  const scaleFactor = Math.min(
+    MAX_CANVAS_WIDTH / width,
+    MAX_CANVAS_HEIGHT / height,
+    1 // Don't scale up
+  )
+  
+  // Use original dimensions unless the image is truly massive
+  const canvasWidth = scaleFactor < 1 ? Math.floor(width * scaleFactor) : width
+  const canvasHeight = scaleFactor < 1 ? Math.floor(height * scaleFactor) : height
+  
+  console.log(`Drawing canvas: ${canvasWidth}x${canvasHeight} (original: ${width}x${height}, scale: ${scaleFactor.toFixed(3)})`)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -150,8 +165,16 @@ const DrawingCanvas: React.FC<{
     canvas.width = canvasWidth
     canvas.height = canvasHeight
 
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d', { 
+      willReadFrequently: false, // Optimize for drawing performance
+      alpha: true, // Allow transparency
+      desynchronized: true // Allow async rendering for better performance
+    })
     if (!ctx) return
+
+    // Configure canvas for memory efficiency
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'medium' // Balance between quality and performance
 
     // Fill with white background
     ctx.fillStyle = '#ffffff'
@@ -161,12 +184,30 @@ const DrawingCanvas: React.FC<{
     if (initialImage) {
       const img = new Image()
       img.onload = () => {
-        // Draw image at full canvas size
+        // Draw image scaled to canvas size
         ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight)
+        console.log(`Drawing canvas initialized: ${canvasWidth}x${canvasHeight} (scale: ${scaleFactor.toFixed(2)})`)
+      }
+      img.onerror = () => {
+        console.warn('Failed to load initial image for drawing canvas')
       }
       img.src = initialImage
+    } else {
+      console.log(`New drawing canvas initialized: ${canvasWidth}x${canvasHeight}`)
     }
-  }, [initialImage, width, height, canvasWidth, canvasHeight])
+    
+    // Cleanup function to clear canvas memory when component unmounts
+    return () => {
+      if (canvas) {
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
+        }
+        canvas.width = 1  // Force canvas buffer deallocation
+        canvas.height = 1
+      }
+    }
+  }, [initialImage, width, height, canvasWidth, canvasHeight, scaleFactor])
 
   const startDrawing = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     setIsDrawing(true)
@@ -246,39 +287,84 @@ const DrawingCanvas: React.FC<{
     const canvas = canvasRef.current
     if (!canvas) return
 
+    // Create output canvas at original resolution
     const outputCanvas = document.createElement('canvas')
-    outputCanvas.width = width // Use original image width for output
-    outputCanvas.height = height // Use original image height for output
-    const outputCtx = outputCanvas.getContext('2d')
+    outputCanvas.width = width
+    outputCanvas.height = height
+    const outputCtx = outputCanvas.getContext('2d', { 
+      willReadFrequently: false,
+      alpha: true
+    })
     
     if (!outputCtx) return
 
-    const sourceX = (canvasWidth - width) / 2
-    const sourceY = (canvasHeight - height) / 2
-    
-    outputCtx.drawImage(
-      canvas,
-      sourceX, sourceY, width, height, // Source: original image area on large canvas
-      0, 0, width, height  // Destination: same size to preserve quality
-    )
+    // Draw the canvas content to the output canvas
+    if (scaleFactor < 1) {
+      // Scale back up if we had to scale down
+      outputCtx.scale(1 / scaleFactor, 1 / scaleFactor)
+      outputCtx.drawImage(canvas, 0, 0)
+    } else {
+      // Direct copy if no scaling was needed
+      outputCtx.drawImage(canvas, 0, 0)
+    }
 
-    // Smart format selection based on original image
+    // Determine appropriate quality based on original image characteristics
     let dataUrl: string
+    let targetQuality = 0.92 // Default to good quality
+    
     if (initialImage) {
+      // Try to estimate original image compression level to match it
       if (initialImage.includes('data:image/jpeg') || initialImage.includes('.jpg') || initialImage.includes('.jpeg')) {
-        // Original was JPEG - use JPEG with high quality to preserve drawing details
-        dataUrl = outputCanvas.toDataURL('image/jpeg', 0.92)
+        // For JPEG originals, use quality that maintains similar file size ratio
+        // Start with good quality, but if the result is much larger than original, adjust
+        
+        // Try different quality levels to find the best match
+        const testQualities = [0.95, 0.90, 0.85, 0.80]
+        let bestQuality = 0.92
+        let bestDataUrl = outputCanvas.toDataURL('image/jpeg', bestQuality)
+        
+        // If we have access to original file size estimate, try to match it
+        if (initialImage.startsWith('data:')) {
+          const originalSize = initialImage.length
+          const targetSize = originalSize * 1.2 // Allow 20% size increase
+          
+          for (const quality of testQualities) {
+            const testDataUrl = outputCanvas.toDataURL('image/jpeg', quality)
+            if (testDataUrl.length <= targetSize) {
+              bestDataUrl = testDataUrl
+              bestQuality = quality
+              break
+            }
+          }
+        }
+        
+        dataUrl = bestDataUrl
+        console.log(`[Drawing] JPEG saved with quality ${bestQuality}`)
       } else if (initialImage.includes('data:image/png') || initialImage.includes('.png')) {
-        // Original was PNG - keep as PNG for transparency/lossless quality
-        dataUrl = outputCanvas.toDataURL('image/png')
+        // Original was PNG - try JPEG first for size, fallback to PNG if needed
+        const jpegDataUrl = outputCanvas.toDataURL('image/jpeg', 0.92)
+        const pngDataUrl = outputCanvas.toDataURL('image/png')
+        
+        // Use JPEG if it's significantly smaller, otherwise keep PNG
+        if (jpegDataUrl.length < pngDataUrl.length * 0.7) {
+          dataUrl = jpegDataUrl
+          console.log(`[Drawing] PNG converted to JPEG for size optimization`)
+        } else {
+          dataUrl = pngDataUrl
+          console.log(`[Drawing] Kept as PNG for quality`)
+        }
       } else {
-        // Unknown format - default to JPEG for smaller size
-        dataUrl = outputCanvas.toDataURL('image/jpeg', 0.92)
+        // Unknown format - use JPEG with good quality
+        dataUrl = outputCanvas.toDataURL('image/jpeg', 0.90)
       }
     } else {
-      // No original image (new drawing) - use JPEG for smaller size
-      dataUrl = outputCanvas.toDataURL('image/jpeg', 0.92)
+      // New drawing - use JPEG with good quality
+      dataUrl = outputCanvas.toDataURL('image/jpeg', 0.90)
     }
+    
+    const fileSizeKB = Math.round(dataUrl.length * 0.75 / 1024)
+    const format = dataUrl.startsWith('data:image/jpeg') ? 'JPEG' : 'PNG'
+    console.log(`Drawing saved: ${fileSizeKB}KB (${format})`)
     
     onSave(dataUrl)
   }
@@ -445,8 +531,9 @@ const SignatureTool: React.FC<{
   const [brushSize, setBrushSize] = useState(3)
   const [brushColor, setBrushColor] = useState('#000000')
 
-  const CANVAS_WIDTH = 600
-  const CANVAS_HEIGHT = 200
+  // Reduced signature canvas size for memory efficiency
+  const CANVAS_WIDTH = 480  // Reduced from 600
+  const CANVAS_HEIGHT = 160 // Reduced from 200
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -455,11 +542,33 @@ const SignatureTool: React.FC<{
     canvas.width = CANVAS_WIDTH
     canvas.height = CANVAS_HEIGHT
 
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d', { 
+      willReadFrequently: false, // Optimize for drawing
+      alpha: true, // Allow transparency for signatures
+      desynchronized: true // Better performance
+    })
     if (!ctx) return
+
+    // Configure for smooth drawing
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'medium'
 
     // Fill with transparent background
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+    
+    console.log(`Signature canvas initialized: ${CANVAS_WIDTH}x${CANVAS_HEIGHT}`)
+    
+    // Cleanup function to clear canvas memory when component unmounts
+    return () => {
+      if (canvas) {
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
+        }
+        canvas.width = 1  // Force canvas buffer deallocation
+        canvas.height = 1
+      }
+    }
   }, [])
 
   const startDrawing = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1322,12 +1431,16 @@ const IllustrationNodeView = React.memo(({ node, updateAttributes, deleteNode, g
           updateAttributes({ src: newUrl });
         }
       } else {
-        // For old images or base64 images, create new temp file
+        // For old images or base64 images, create new temp file with unique ID
         const mimeType = dataUrl.startsWith('data:image/jpeg') ? 'image/jpeg' : 'image/png';
+        const timestamp = Date.now();
+        const uniqueId = `drawing_edit_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+        
         result = await (window as any).api.createTempImage({
           imageData: src.startsWith('data:') ? src : dataUrl, // Use original src if it's base64, otherwise use drawing
           originalPath: src.startsWith('rsrch-image://') ? decodeURIComponent(src.replace('rsrch-image://', '')) : undefined,
-          mimeType: mimeType
+          mimeType: mimeType,
+          uniqueId: uniqueId
         });
         
         if (result.success) {
@@ -1977,4 +2090,6 @@ export const IllustrationNode = Node.create({
       },
     } as any
   },
+
+
 })
