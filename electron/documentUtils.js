@@ -142,20 +142,45 @@ export async function embedImagesInContent(contentHtml, tempDir) {
   let match;
   while ((match = relativeImageRegex.exec(contentHtml)) !== null) {
     const [fullMatch, fileName] = match;
-    const filePath = path.join(tempDir, fileName);
+    const filePath = path.join(tempDir, 'images', fileName);
     
     try {
       // Check if file exists
       await fs.access(filePath);
+      console.log('[DocumentUtils] ✅ Image file exists:', filePath);
       
       // Convert to custom protocol URL for safe access
+      // Use forward slashes in the URL but keep the original path for encoding
       const normalizedPath = filePath.replace(/\\/g, '/');
       const customUrl = `rsrch-image://${encodeURIComponent(normalizedPath)}`;
+      
+      console.log('[DocumentUtils] Created custom URL:', customUrl);
       
       // Replace relative path with custom protocol URL
       modifiedHtml = modifiedHtml.replace(fullMatch, `src="${customUrl}"`);
     } catch (error) {
-      console.warn(`Failed to access image ${fileName}:`, error);
+      console.warn(`[DocumentUtils] ❌ Failed to access image ${fileName}:`, error.message);
+      console.warn(`[DocumentUtils] Expected path:`, filePath);
+      
+      // Try to debug the issue
+      try {
+        const tempDirExists = await fs.access(tempDir).then(() => true).catch(() => false);
+        console.log('[DocumentUtils] Temp directory exists:', tempDirExists, tempDir);
+        
+        if (tempDirExists) {
+          const imagesDirPath = path.join(tempDir, 'images');
+          const imagesDirExists = await fs.access(imagesDirPath).then(() => true).catch(() => false);
+          console.log('[DocumentUtils] Images directory exists:', imagesDirExists, imagesDirPath);
+          
+          if (imagesDirExists) {
+            const files = await fs.readdir(imagesDirPath);
+            console.log('[DocumentUtils] Available image files:', files);
+          }
+        }
+      } catch (debugError) {
+        console.error('[DocumentUtils] Error during debugging:', debugError.message);
+      }
+      
       // Keep the relative path if image can't be accessed
     }
   }
@@ -276,11 +301,26 @@ export async function extractDocumentArchive(archivePath) {
     
     await Promise.all(imagePromises);
     
-    // Convert relative paths to file:// URLs
+    console.log('[DocumentUtils] Image extraction completed');
+    console.log('[DocumentUtils] Temp directory:', tempDir);
+    console.log('[DocumentUtils] Images directory:', imagesDir);
+    
+    // List extracted images for debugging
+    try {
+      const extractedImages = await fs.readdir(imagesDir);
+      console.log('[DocumentUtils] Extracted images:', extractedImages);
+    } catch (err) {
+      console.error('[DocumentUtils] Error reading images directory:', err.message);
+    }
+    
+    // Convert relative paths to rsrch-image:// URLs
+    console.log('[DocumentUtils] Converting relative paths to protocol URLs...');
     const contentWithImages = await embedImagesInContent(
       documentData.contentHtml || '', 
-      imagesDir
+      tempDir  // Pass tempDir, not imagesDir - embedImagesInContent will join with 'images'
     );
+    
+    console.log('[DocumentUtils] Image embedding completed');
     
     return {
       ...documentData,

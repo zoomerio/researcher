@@ -21,6 +21,12 @@ async function main() {
     '--memory-pressure-off',          // Electron-specific flag
     '--no-sandbox',                   // Reduce security overhead in dev
     '--disable-web-security',         // Allow local file access in dev
+    '--disable-hardware-acceleration', // Disable GPU acceleration to save memory
+    '--disable-gpu',                  // Completely disable GPU process
+    '--disable-gpu-memory-buffer-video-frames', // Disable GPU memory buffers for video
+    '--disable-background-timer-throttling', // Disable throttling for consistent performance
+    '--disable-renderer-backgrounding', // Prevent renderer from being backgrounded
+    '--disable-features=TranslateUI,BlinkGenPropertyTrees', // Disable unnecessary features
   ];
   
   const child = spawn(electronBinary, electronArgs, {

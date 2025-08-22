@@ -4,7 +4,6 @@
  */
 
 import React from 'react';
-import { memoizeComponent } from '../utils/memoization';
 import { memoryMonitor } from '../utils/memoryMonitor';
 
 interface PerformanceData {
@@ -20,8 +19,7 @@ interface PerformanceMonitorProps {
   position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 }
 
-export const PerformanceMonitor = memoizeComponent(
-  ({ isVisible = false, position = 'top-right' }: PerformanceMonitorProps) => {
+const PerformanceMonitorComponent = ({ isVisible = false, position = 'top-right' }: PerformanceMonitorProps) => {
     const [performanceData, setPerformanceData] = React.useState<PerformanceData[]>([]);
     const [isExpanded, setIsExpanded] = React.useState(false);
     
@@ -117,12 +115,12 @@ export const PerformanceMonitor = memoizeComponent(
         )}
       </div>
     );
-  },
-  (prevProps, nextProps) => {
-    return (
-      prevProps.isVisible === nextProps.isVisible &&
-      prevProps.position === nextProps.position
-    );
-  }
-);
+};
+
+export const PerformanceMonitor = React.memo(PerformanceMonitorComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.isVisible === nextProps.isVisible &&
+    prevProps.position === nextProps.position
+  );
+});
 

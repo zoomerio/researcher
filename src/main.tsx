@@ -5,21 +5,16 @@ import './styles.css';
 import 'katex/dist/katex.min.css';
 import { memoryMonitor } from './utils/memoryMonitor';
 
-// Initialize safe render tracking in development (why-did-you-render temporarily disabled)
-// import './utils/whyDidYouRender';  // Disabled due to TipTap hook interference
+// Initialize safe render tracking in development
 import './utils/simpleRenderTracker';
 
-// Import optimized components for development
+// Import development components
 let MemoryMonitorDashboard: React.ComponentType | null = null;
 let PerformanceMonitor: React.ComponentType<any> | null = null;
-let OptimizedApp: React.ComponentType | null = null;
 
 if (process.env.NODE_ENV === 'development') {
   MemoryMonitorDashboard = React.lazy(() => import('./components/MemoryMonitorDashboard'));
   PerformanceMonitor = React.lazy(() => import('./components/PerformanceMonitor').then(m => ({ default: m.PerformanceMonitor })));
-  
-  // Optionally use optimized app in development for testing
-  // OptimizedApp = React.lazy(() => import('./components/optimized/OptimizedApp'));
 }
 
 // Simple approach - rely on TipTap Mathematics extension only

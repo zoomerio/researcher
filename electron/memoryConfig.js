@@ -48,8 +48,8 @@ class MemoryConfig {
       autoplayPolicy: 'user-gesture-required',
       disableBlinkFeatures: 'Auxclick',
       
-      // Graphics optimizations - disabled for maximum memory savings
-      webgl: false, // Disable WebGL to save memory (may affect Plotly performance)
+      // Graphics optimizations - completely disable for memory savings
+      webgl: false, // Disable WebGL to save GPU memory
       acceleratedGraphics: false, // Disable GPU acceleration to save memory
       hardwareAcceleration: false, // Explicitly disable hardware acceleration
       
@@ -95,14 +95,17 @@ class MemoryConfig {
       '--optimize-for-size', // Duplicate for emphasis
       '--no-concurrent-recompilation', // Disable concurrent compilation to save memory
       '--single-threaded-gc', // Use single-threaded GC for lower memory overhead
+      '--disable-background-timer-throttling', // Disable background throttling
+      '--no-use-turbo-fan', // Disable TurboFan for lower memory usage
+      '--turbo-filter=~', // Disable all TurboFan optimizations
     ];
 
-    // Adjust heap size based on system memory and window type - even more aggressive limits
+    // Even more aggressive heap limits since hardware acceleration is disabled
     let heapSize;
     if (isChildWindow) {
-      heapSize = this.isLowMemorySystem ? 32 : 64; // Further reduced for child windows
+      heapSize = this.isLowMemorySystem ? 48 : 96; // Further reduced
     } else {
-      heapSize = this.isLowMemorySystem ? 64 : 128; // Further reduced for main window
+      heapSize = this.isLowMemorySystem ? 96 : 192; // Further reduced
     }
 
     const memoryFlags = [
@@ -249,8 +252,8 @@ class MemoryConfig {
     const arch = process.arch;
 
     const optimizations = {
-      // Base optimizations for all systems - always disable hardware acceleration
-      disableHardwareAcceleration: true, // Always disable for memory savings
+      // Base optimizations for all systems
+      disableHardwareAcceleration: this.isLowMemorySystem,
       enableBackgroundThrottling: !this.isDevelopment,
       
       // Platform-specific optimizations

@@ -277,6 +277,47 @@ export const App: React.FC = () => {
   } | null>(null);
   // detach is triggered by double-click now; DnD used for reorder and reattach only
 
+  // Memory optimization: Periodically trigger garbage collection and cleanup
+  useEffect(() => {
+    let cleanupInterval: NodeJS.Timeout
+    
+    const performMemoryCleanup = () => {
+      // Trigger manual garbage collection if available
+      if ((window as any).gc) {
+        try {
+          const memBefore = (performance as any).memory?.usedJSHeapSize || 0
+          ;(window as any).gc()
+          const memAfter = (performance as any).memory?.usedJSHeapSize || 0
+          const freed = Math.round((memBefore - memAfter) / 1024 / 1024)
+          if (freed > 0) {
+            console.log(`[Renderer] Manual GC freed ${freed}MB`)
+          }
+        } catch (error) {
+          console.warn('[Renderer] Manual GC failed:', error)
+        }
+      }
+      
+      // Clean up blob URLs that might be lingering
+      const images = document.querySelectorAll('img[src^="blob:"]')
+      images.forEach((img) => {
+        if (img instanceof HTMLImageElement && img.src.startsWith('blob:')) {
+          // Check if the image is still visible or needed
+          const rect = img.getBoundingClientRect()
+          if (rect.width === 0 && rect.height === 0) {
+            URL.revokeObjectURL(img.src)
+          }
+        }
+      })
+    }
+    
+    // Run cleanup every 2 minutes
+    cleanupInterval = setInterval(performMemoryCleanup, 120000)
+    
+    return () => {
+      clearInterval(cleanupInterval)
+    }
+  }, [])
+
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId), [tabs, activeTabId]);
 
   // Editor must be declared before any useEffect/useRef that references it
@@ -2202,14 +2243,36 @@ const ImagesBar: React.FC<{ editor: any; activeTool: string; selectedIllustratio
           // Compress image before inserting
           const compressedDataUrl = await compressImage((result as any).dataUrl)
           
-          console.log('[App] Inserting image with src:', compressedDataUrl.substring(0, 100) + '...');
-          editor?.chain().focus().insertIllustration({ 
-            src: compressedDataUrl,
-            width: insertWidth,
-            height: insertHeight,
-            alignment: 'left',
-            textWrap: 'none' // No text wrapping by default
-          }).run()
+          // Create temp file with unique identifier to prevent path sharing on copy-paste
+          const timestamp = Date.now()
+          const uniqueId = `inserted_${timestamp}_${Math.random().toString(36).substr(2, 9)}`
+          
+          try {
+            const tempResult = await (window as any).api.createTempImage({
+              imageData: compressedDataUrl,
+              mimeType: 'image/jpeg', // Compressed images are typically JPEG
+              uniqueId: uniqueId
+            });
+            
+            const finalSrc = tempResult.success ? tempResult.customUrl : compressedDataUrl;
+            
+            editor?.chain().focus().insertIllustration({ 
+              src: finalSrc,
+              width: insertWidth,
+              height: insertHeight,
+              alignment: 'left',
+              textWrap: 'none' // No text wrapping by default
+            }).run();
+          } catch (tempError) {
+            console.warn('Failed to create temp file, using direct insertion:', tempError);
+            editor?.chain().focus().insertIllustration({ 
+              src: compressedDataUrl,
+              width: insertWidth,
+              height: insertHeight,
+              alignment: 'left',
+              textWrap: 'none'
+            }).run();
+          }
         }
         img.src = (result as any).dataUrl
       }
@@ -2220,40 +2283,52 @@ const ImagesBar: React.FC<{ editor: any; activeTool: string; selectedIllustratio
 
   async function createDrawing() {
     try {
-      // Create a smaller blank canvas for drawing (can be resized later)
+      // Create a smaller blank canvas for drawing - reduced size for memory efficiency
       const canvas = document.createElement('canvas')
-      canvas.width = 600
-      canvas.height = 400
-      const ctx = canvas.getContext('2d')
+      canvas.width = 480  // Reduced from 600
+      canvas.height = 320 // Reduced from 400
+      const ctx = canvas.getContext('2d', { 
+        willReadFrequently: false, 
+        alpha: false  // No transparency needed for solid background
+      })
       if (ctx) {
         ctx.fillStyle = '#ffffff'
-        ctx.fillRect(0, 0, 600, 400)
-        // Use JPEG for smaller file size since it's a solid white background
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
+        ctx.fillRect(0, 0, 480, 320)
         
-        // Create temp file for the blank drawing
+        // Add unique text watermark to ensure each drawing has unique content
+        const timestamp = Date.now()
+        const uniqueId = Math.random().toString(36).substr(2, 9)
+        ctx.fillStyle = '#ffffff' // Same as background - invisible but makes content unique
+        ctx.font = '1px Arial'
+        ctx.fillText(`drawing_${timestamp}_${uniqueId}`, 1, 1)
+        
+        // Use PNG for lossless quality (better for editing)
+        const dataUrl = canvas.toDataURL('image/png')
+        
+        console.log(`New drawing created: ${Math.round(dataUrl.length / 1024)}KB (480x320px) - ID: ${uniqueId}`)
+        
+        // Create temp file for the blank drawing with unique identifier
         const result = await (window as any).api.createTempImage({
           imageData: dataUrl,
-          mimeType: 'image/jpeg'
+          mimeType: 'image/png',
+          uniqueId: `drawing_${timestamp}_${uniqueId}`
         });
         
         if (result.success) {
-          console.log('[App] Inserting drawing with custom URL:', result.customUrl);
           editor?.chain().focus().insertIllustration({ 
             src: result.customUrl,
-            width: 600,
-            height: 400,
+            width: 480,
+            height: 320,
             alignment: 'left',
             textWrap: 'none' // No text wrapping by default
           }).run();
         } else {
           console.error('Failed to create temp drawing:', result.error);
           // Fallback to base64 if temp creation fails
-          console.log('[App] Fallback to base64 for drawing');
           editor?.chain().focus().insertIllustration({ 
             src: dataUrl,
-            width: 600,
-            height: 400,
+            width: 480,
+            height: 320,
             alignment: 'left',
             textWrap: 'none'
           }).run();
