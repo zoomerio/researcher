@@ -23,6 +23,8 @@ import BackgroundColor from '../tiptap/BackgroundColor';
 import { MathEditingNode } from '../tiptap/MathEditingNode';
 import { GraphNode } from '../tiptap/GraphNode';
 import { IllustrationNode } from '../tiptap/IllustrationNode';
+import { AuthWrapper } from '../components/AuthWrapper';
+import { DocumentLibrary } from '../components/DocumentLibrary';
 import {
   RiBold,
   RiItalic,
@@ -254,13 +256,28 @@ declare global {
         onExternalDragEnd: (cb: () => void) => void;
         closeSelf: () => Promise<any>;
         pickImage: () => Promise<{ canceled: boolean; filePath?: string }>;
+        // Authentication
+        register: (payload: { username: string; fullName: string; groupId: string; password: string }) => Promise<any>;
+        login: (payload: { username: string; password: string }) => Promise<any>;
+        validateSession: (payload: { sessionToken: string }) => Promise<any>;
+        logout: (payload: { sessionToken: string }) => Promise<any>;
+        getUser: (payload: { userId: number }) => Promise<any>;
+        // Document management
+        saveDocumentMetadata: (payload: { documentData: any; authorData: any; filePath: string; coverImagePath?: string }) => Promise<any>;
+        getUserDocuments: (payload: { userId: number }) => Promise<any>;
+        getAllDocuments: () => Promise<any>;
+        getDocumentById: (payload: { documentId: number }) => Promise<any>;
+        getDocumentByPath: (payload: { filePath: string }) => Promise<any>;
+        deleteDocument: (payload: { documentId: number; userId: number }) => Promise<any>;
+        searchDocuments: (payload: { query: string; userId?: number }) => Promise<any>;
+        generateDocumentCover: (payload: { htmlContent: string; filePath: string; oldCoverPath?: string }) => Promise<any>;
     };
   }
 }
 
 const uid = () => Math.random().toString(36).slice(2);
 
-export const App: React.FC = () => {
+const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void }> = ({ user, sessionToken, logout }) => {
   const [activeTabId, setActiveTabId] = useState<string>('home');
   const [tabs, setTabs] = useState<Tab[]>([
     { id: 'home', title: 'Начало', closable: false, type: 'home' },
@@ -1120,6 +1137,8 @@ export const App: React.FC = () => {
     // Meta and editor content will be reset by useEffect when switching to create tab
   }
 
+
+
   function createDocument() {
     const id = uid();
     setTabs((prev) => {
@@ -1418,6 +1437,13 @@ export const App: React.FC = () => {
       plan: docMeta.plan,
       analysis: currentMeta?.analysis,
       contentHtml: editor?.getHTML() || '',
+      author: {
+        id: user.id,
+        username: user.username,
+        fullName: user.fullName,
+        groupId: user.groupId,
+        savedAt: new Date().toISOString()
+      },
       version: 1,
     };
     // Update tab's meta data with current state before saving
@@ -1443,11 +1469,60 @@ export const App: React.FC = () => {
     }
 
     if (currentTab?.filePath) {
+      console.log('[Save] Saving document to existing path:', currentTab.filePath);
       const res = await window.api.saveDocumentToPath({ filePath: currentTab.filePath, jsonData, asXml: false });
+      console.log('[Save] File save result:', res);
       if (!res?.canceled) {
+        console.log('[Save] File save successful, proceeding with metadata save...');
         setTabs((prev) => prev.map((t) => t.id === currentTab.id ? { ...t, filePath: res.filePath } : t));
+        
+        // Save document metadata to database
+        try {
+          console.log('[Save] Starting document metadata save process...');
+          console.log('[Save] User data:', user);
+          console.log('[Save] Document data:', {
+            title: docMeta.title,
+            description: docMeta.description,
+            goals: docMeta.goals,
+            hypotheses: docMeta.hypotheses,
+            plan: docMeta.plan
+          });
+          
+          // Generate document cover
+          console.log('[Save] Generating document cover...');
+          const coverResult = await window.api.generateDocumentCover({
+            htmlContent: editor?.getHTML() || '',
+            filePath: currentTab.filePath
+          });
+          console.log('[Save] Cover generation result:', coverResult);
+          
+          const coverPath = coverResult.success ? coverResult.coverPath : null;
+          
+          // Save to database
+          console.log('[Save] Saving to database...');
+          const saveResult = await window.api.saveDocumentMetadata({
+            documentData: {
+              title: docMeta.title,
+              description: docMeta.description,
+              goals: docMeta.goals,
+              hypotheses: docMeta.hypotheses,
+              plan: docMeta.plan
+            },
+            authorData: user,
+            filePath: currentTab.filePath,
+            coverImagePath: coverPath
+          });
+          console.log('[Save] Database save result:', saveResult);
+          
+          console.log('Document metadata saved to database successfully');
+        } catch (error) {
+          console.error('Failed to save document metadata:', error);
+        }
+      } else {
+        console.log('[Save] File save was canceled or failed:', res);
       }
     } else {
+      console.log('[Save] No existing file path, calling saveAs...');
       await saveAs();
     }
   }
@@ -1469,6 +1544,13 @@ export const App: React.FC = () => {
         plan: meta.plan,
         analysis: currentMeta?.analysis,
         contentHtml: e?.getHTML() || '',
+        author: {
+          id: user.id,
+          username: user.username,
+          fullName: user.fullName,
+          groupId: user.groupId,
+          savedAt: new Date().toISOString()
+        },
         version: 1,
       };
 
@@ -1493,11 +1575,73 @@ export const App: React.FC = () => {
       ));
 
       if (currentTab?.filePath) {
+        console.log('[SaveRef] Saving document to existing path:', currentTab.filePath);
         const res = await window.api.saveDocumentToPath({ filePath: currentTab.filePath, jsonData, asXml: false });
+        console.log('[SaveRef] File save result:', res);
         if (!res?.canceled) {
+          console.log('[SaveRef] File save successful, proceeding with metadata save...');
           setTabs((prev) => prev.map((t) => t.id === currentTab.id ? { ...t, filePath: res.filePath } : t));
+          
+          // Save document metadata to database
+          try {
+            console.log('[SaveRef] Starting document metadata save process...');
+            console.log('[SaveRef] User data:', user);
+            console.log('[SaveRef] Document data:', {
+              title: meta.title,
+              description: meta.description,
+              goals: meta.goals,
+              hypotheses: meta.hypotheses,
+              plan: meta.plan
+            });
+            
+            // Generate document cover (get old cover path first)
+            console.log('[SaveRef] Getting existing document info for cover replacement...');
+            let oldCoverPath = null;
+            try {
+              const existingDoc = await window.api.getDocumentByPath({ filePath: currentTab.filePath });
+              if (existingDoc.success && existingDoc.document) {
+                oldCoverPath = existingDoc.document.cover_image_path;
+                console.log('[SaveRef] Found existing cover to replace:', oldCoverPath);
+              }
+            } catch (error) {
+              console.log('[SaveRef] No existing document found, creating new cover');
+            }
+            
+            console.log('[SaveRef] Generating document cover...');
+            const coverResult = await window.api.generateDocumentCover({
+              htmlContent: e?.getHTML() || '',
+              filePath: currentTab.filePath,
+              oldCoverPath: oldCoverPath
+            });
+            console.log('[SaveRef] Cover generation result:', coverResult);
+            
+            const coverPath = coverResult.success ? coverResult.coverPath : null;
+            
+            // Save to database
+            console.log('[SaveRef] Saving to database...');
+            const saveResult = await window.api.saveDocumentMetadata({
+              documentData: {
+                title: meta.title,
+                description: meta.description,
+                goals: meta.goals,
+                hypotheses: meta.hypotheses,
+                plan: meta.plan
+              },
+              authorData: user,
+              filePath: currentTab.filePath,
+              coverImagePath: coverPath
+            });
+            console.log('[SaveRef] Database save result:', saveResult);
+            
+            console.log('Document metadata saved to database successfully');
+          } catch (error) {
+            console.error('Failed to save document metadata:', error);
+          }
+        } else {
+          console.log('[SaveRef] File save was canceled or failed:', res);
         }
       } else {
+        console.log('[SaveRef] No existing file path, calling saveAsRef...');
         await saveAsRef.current();
       }
     };
@@ -1516,6 +1660,13 @@ export const App: React.FC = () => {
         plan: meta.plan,
         analysis: currentMeta?.analysis,
         contentHtml: e?.getHTML() || '',
+        author: {
+          id: user.id,
+          username: user.username,
+          fullName: user.fullName,
+          groupId: user.groupId,
+          savedAt: new Date().toISOString()
+        },
         version: 1,
       };
 
@@ -1539,10 +1690,58 @@ export const App: React.FC = () => {
           : tab
       ));
 
+      console.log('[SaveAsRef] Calling saveDocumentAs with jsonData...');
       const res = await window.api.saveDocumentAs({ jsonData, asXml: false });
+      console.log('[SaveAsRef] File save result:', res);
       if (!res?.canceled) {
+        console.log('[SaveAsRef] File save successful, proceeding with metadata save...');
         const fp = res.filePath as string;
         setTabs((prev) => prev.map((t) => t.id === a.id ? { ...t, filePath: fp, title: meta.title || t.title } : t));
+        
+        // Save document metadata to database
+        try {
+          console.log('[SaveAsRef] Starting document metadata save process...');
+          console.log('[SaveAsRef] User data:', user);
+          console.log('[SaveAsRef] Document data:', {
+            title: meta.title,
+            description: meta.description,
+            goals: meta.goals,
+            hypotheses: meta.hypotheses,
+            plan: meta.plan
+          });
+          
+          // Generate document cover
+          console.log('[SaveAsRef] Generating document cover...');
+          const coverResult = await window.api.generateDocumentCover({
+            htmlContent: e?.getHTML() || '',
+            filePath: fp
+          });
+          console.log('[SaveAsRef] Cover generation result:', coverResult);
+          
+          const coverPath = coverResult.success ? coverResult.coverPath : null;
+          
+          // Save to database
+          console.log('[SaveAsRef] Saving to database...');
+          const saveResult = await window.api.saveDocumentMetadata({
+            documentData: {
+              title: meta.title,
+              description: meta.description,
+              goals: meta.goals,
+              hypotheses: meta.hypotheses,
+              plan: meta.plan
+            },
+            authorData: user,
+            filePath: fp,
+            coverImagePath: coverPath
+          });
+          console.log('[SaveAsRef] Database save result:', saveResult);
+          
+          console.log('Document metadata saved to database successfully');
+        } catch (error) {
+          console.error('Failed to save document metadata:', error);
+        }
+      } else {
+        console.log('[SaveAsRef] File save was canceled or failed:', res);
       }
     };
   }, [tabs, activeTabId, editor, docMeta]);
@@ -1559,6 +1758,13 @@ export const App: React.FC = () => {
       plan: docMeta.plan,
       analysis: currentMeta?.analysis,
       contentHtml: editor?.getHTML() || '',
+      author: {
+        id: user.id,
+        username: user.username,
+        fullName: user.fullName,
+        groupId: user.groupId,
+        savedAt: new Date().toISOString()
+      },
       version: 1,
     };
 
@@ -1584,10 +1790,58 @@ export const App: React.FC = () => {
       ));
     }
 
+    console.log('[SaveAs] Calling saveDocumentAs with jsonData...');
     const res = await window.api.saveDocumentAs({ jsonData, asXml: false });
+    console.log('[SaveAs] File save result:', res);
     if (!res?.canceled) {
+      console.log('[SaveAs] File save successful, proceeding with metadata save...');
       const fp = res.filePath as string;
       setTabs((prev) => prev.map((t) => t.id === activeTab.id ? { ...t, filePath: fp, title: docMeta.title || t.title } : t));
+      
+      // Save document metadata to database
+      try {
+        console.log('[SaveAs] Starting document metadata save process...');
+        console.log('[SaveAs] User data:', user);
+        console.log('[SaveAs] Document data:', {
+          title: docMeta.title,
+          description: docMeta.description,
+          goals: docMeta.goals,
+          hypotheses: docMeta.hypotheses,
+          plan: docMeta.plan
+        });
+        
+        // Generate document cover
+        console.log('[SaveAs] Generating document cover...');
+        const coverResult = await window.api.generateDocumentCover({
+          htmlContent: editor?.getHTML() || '',
+          filePath: fp
+        });
+        console.log('[SaveAs] Cover generation result:', coverResult);
+        
+        const coverPath = coverResult.success ? coverResult.coverPath : null;
+        
+        // Save to database
+        console.log('[SaveAs] Saving to database...');
+        const saveResult = await window.api.saveDocumentMetadata({
+          documentData: {
+            title: docMeta.title,
+            description: docMeta.description,
+            goals: docMeta.goals,
+            hypotheses: docMeta.hypotheses,
+            plan: docMeta.plan
+          },
+          authorData: user,
+          filePath: fp,
+          coverImagePath: coverPath
+        });
+        console.log('[SaveAs] Database save result:', saveResult);
+        
+        console.log('Document metadata saved to database successfully');
+      } catch (error) {
+        console.error('Failed to save document metadata:', error);
+      }
+    } else {
+      console.log('[SaveAs] File save was canceled or failed:', res);
     }
   }
 
@@ -1776,7 +2030,7 @@ export const App: React.FC = () => {
             ? 'conduct-mode' 
             : 'padded-mode'
         }`} ref={viewRef}>
-          {activeTab?.type === 'home' && (
+          {activeTab?.type === 'home' && sidebarView !== 'research' && (
             <div>
               <h2>Добро пожаловать в Researcher</h2>
               <p className="section-title">Навигация</p>
@@ -1785,6 +2039,28 @@ export const App: React.FC = () => {
                 <li>Верхняя панель: создание/сохранение/открытие/экспорт</li>
               </ul>
             </div>
+          )}
+
+          {/* Research content shown when sidebar view is 'research' */}
+          {sidebarView === 'research' && activeTab?.type === 'home' && (
+            <DocumentLibrary 
+              user={user} 
+              onOpenDocument={async (filePath) => {
+                try {
+                  console.log('[DocumentLibrary] Opening document:', filePath);
+                  const result = await window.api.openDocumentPath(filePath);
+                  console.log('[DocumentLibrary] Open document result:', result);
+                  if (!result.canceled && result.data) {
+                    console.log('[DocumentLibrary] Loading document data into new tab...');
+                    openLoadedDoc(result.data, result.filePath);
+                  } else {
+                    console.error('[DocumentLibrary] Failed to open document - no data or canceled');
+                  }
+                } catch (error) {
+                  console.error('Failed to open document:', error);
+                }
+              }}
+            />
           )}
 
           {activeTab?.type === 'create' && (
@@ -3236,4 +3512,14 @@ const GraphsBar: React.FC<{ editor: any; selectedGraph: any; setSelectedGraph: (
   );
 };
 
+// Main App component with authentication wrapper
+export const App: React.FC = () => {
+  return (
+    <AuthWrapper>
+      {(user, sessionToken, logout) => (
+        <AppContent user={user} sessionToken={sessionToken} logout={logout} />
+      )}
+    </AuthWrapper>
+  );
+};
 

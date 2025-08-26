@@ -15,7 +15,9 @@
     "lint": "echo No linter configured",
     "analyze:bundle": "npm run build:renderer && npx source-map-explorer 'dist/assets/*.js'",
     "analyze:bundle-server": "npm run build:renderer && npx source-map-explorer 'dist/assets/*.js' --html",
-    "install:memory-monitoring": "npm install --save-dev source-map-explorer@^2.5.3 @welldone-software/why-did-you-render@^8.0.3"
+    "install:memory-monitoring": "npm install --save-dev source-map-explorer@^2.5.3 @welldone-software/why-did-you-render@^8.0.3",
+    "postinstall": "electron-rebuild",
+    "rebuild": "electron-rebuild"
   },
   "build": {
     "appId": "com.example.researcher",
@@ -71,7 +73,6 @@
   "dependencies": {
     "@tiptap/core": "^3.1.0",
     "@tiptap/extension-code-block": "^3.1.0",
-
     "@tiptap/extension-color": "^3.1.0",
     "@tiptap/extension-drag-handle": "^3.1.0",
     "@tiptap/extension-drag-handle-react": "^3.1.0",
@@ -79,7 +80,6 @@
     "@tiptap/extension-highlight": "^3.1.0",
     "@tiptap/extension-image": "^3.1.0",
     "@tiptap/extension-mathematics": "^3.1.0",
-
     "@tiptap/extension-subscript": "^3.1.0",
     "@tiptap/extension-superscript": "^3.1.0",
     "@tiptap/extension-table": "^3.1.0",
@@ -93,7 +93,7 @@
     "@tiptap/react": "^3.1.0",
     "@tiptap/starter-kit": "^3.1.0",
     "@types/plotly.js": "^3.0.3",
-
+    "better-sqlite3": "^12.2.0",
     "classnames": "^2.5.1",
     "jszip": "^3.10.1",
     "katex": "^0.16.10",
@@ -102,9 +102,11 @@
     "react-dom": "^18.3.1",
     "react-icons": "^5.2.1",
     "react-katex": "^3.1.0",
-    "react-plotly.js": "^2.6.0"
+    "react-plotly.js": "^2.6.0",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.1",
     "@types/node": "^20.14.9",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

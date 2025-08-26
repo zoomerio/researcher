@@ -13,6 +13,8 @@ import {
 import { childProcessManager } from './childProcessManager.js';
 import { processPriorityManager } from './processPriorityManager.js';
 import { memoryConfig } from './memoryConfig.js';
+import { userDatabase } from './database.js';
+import { generateDocumentCover } from './documentCover.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1017,4 +1019,150 @@ ipcMain.handle('image:save-temp-edit', async (_event, { tempPath, imageData }) =
   }
 });
 
+// Authentication IPC handlers
+ipcMain.handle('auth:register', async (_event, { username, fullName, groupId, password }) => {
+  try {
+    const result = userDatabase.registerUser(username, fullName, groupId, password);
+    return result;
+  } catch (error) {
+    console.error('[Auth] Registration error:', error);
+    return { success: false, error: 'Registration failed' };
+  }
+});
+
+ipcMain.handle('auth:login', async (_event, { username, password }) => {
+  try {
+    const result = userDatabase.authenticateUser(username, password);
+    return result;
+  } catch (error) {
+    console.error('[Auth] Login error:', error);
+    return { success: false, error: 'Login failed' };
+  }
+});
+
+ipcMain.handle('auth:validate-session', async (_event, { sessionToken }) => {
+  try {
+    const result = userDatabase.validateSession(sessionToken);
+    return result;
+  } catch (error) {
+    console.error('[Auth] Session validation error:', error);
+    return { success: false, error: 'Session validation failed' };
+  }
+});
+
+ipcMain.handle('auth:logout', async (_event, { sessionToken }) => {
+  try {
+    const result = userDatabase.logoutUser(sessionToken);
+    return result;
+  } catch (error) {
+    console.error('[Auth] Logout error:', error);
+    return { success: false, error: 'Logout failed' };
+  }
+});
+
+ipcMain.handle('auth:get-user', async (_event, { userId }) => {
+  try {
+    const result = userDatabase.getUserById(userId);
+    return result;
+  } catch (error) {
+    console.error('[Auth] Get user error:', error);
+    return { success: false, error: 'Failed to get user' };
+  }
+});
+
+// Document management IPC handlers
+ipcMain.handle('documents:save', async (_event, { documentData, authorData, filePath, coverImagePath }) => {
+  try {
+    console.log('[Main] Received document save request:');
+    console.log('[Main] Document data:', documentData);
+    console.log('[Main] Author data:', authorData);
+    console.log('[Main] File path:', filePath);
+    console.log('[Main] Cover image path:', coverImagePath);
+    
+    const result = userDatabase.saveDocument(documentData, authorData, filePath, coverImagePath);
+    console.log('[Main] Database save result:', result);
+    return result;
+  } catch (error) {
+    console.error('[Documents] Save document error:', error);
+    return { success: false, error: 'Failed to save document' };
+  }
+});
+
+ipcMain.handle('documents:get-user-documents', async (_event, { userId }) => {
+  try {
+    console.log('[Main] Getting user documents for userId:', userId);
+    const result = userDatabase.getUserDocuments(userId);
+    console.log('[Main] User documents result:', result);
+    return result;
+  } catch (error) {
+    console.error('[Documents] Get user documents error:', error);
+    return { success: false, error: 'Failed to get user documents' };
+  }
+});
+
+ipcMain.handle('documents:get-all', async (_event) => {
+  try {
+    console.log('[Main] Getting all documents');
+    const result = userDatabase.getAllDocuments();
+    console.log('[Main] All documents result:', result);
+    return result;
+  } catch (error) {
+    console.error('[Documents] Get all documents error:', error);
+    return { success: false, error: 'Failed to get all documents' };
+  }
+});
+
+ipcMain.handle('documents:get-by-id', async (_event, { documentId }) => {
+  try {
+    const result = userDatabase.getDocumentById(documentId);
+    return result;
+  } catch (error) {
+    console.error('[Documents] Get document error:', error);
+    return { success: false, error: 'Failed to get document' };
+  }
+});
+
+ipcMain.handle('documents:get-by-path', async (_event, { filePath }) => {
+  try {
+    console.log('[Main] Getting document by path:', filePath);
+    const result = userDatabase.getDocumentByPath(filePath);
+    console.log('[Main] Get document by path result:', result);
+    return result;
+  } catch (error) {
+    console.error('[Documents] Get document by path error:', error);
+    return { success: false, error: 'Failed to get document by path' };
+  }
+});
+
+ipcMain.handle('documents:delete', async (_event, { documentId, userId }) => {
+  try {
+    const result = userDatabase.deleteDocument(documentId, userId);
+    return result;
+  } catch (error) {
+    console.error('[Documents] Delete document error:', error);
+    return { success: false, error: 'Failed to delete document' };
+  }
+});
+
+ipcMain.handle('documents:search', async (_event, { query, userId }) => {
+  try {
+    const result = userDatabase.searchDocuments(query, userId);
+    return result;
+  } catch (error) {
+    console.error('[Documents] Search documents error:', error);
+    return { success: false, error: 'Failed to search documents' };
+  }
+});
+
+// Document cover generation
+ipcMain.handle('documents:generate-cover', async (_event, { htmlContent, filePath, oldCoverPath }) => {
+  try {
+    // Generate a cover image from the document content
+    const coverPath = await generateDocumentCover(htmlContent, filePath, oldCoverPath);
+    return { success: true, coverPath };
+  } catch (error) {
+    console.error('[Documents] Generate cover error:', error);
+    return { success: false, error: 'Failed to generate document cover' };
+  }
+});
 

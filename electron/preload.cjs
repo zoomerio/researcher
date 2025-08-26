@@ -65,6 +65,21 @@ const api = {
   executeDocumentOperation: (operation, data) => ipcRenderer.invoke('process:document-operation', { operation, data }),
   executeImageOperation: (operation, data) => ipcRenderer.invoke('process:image-operation', { operation, data }),
   getProcessStats: () => ipcRenderer.invoke('process:get-stats'),
+  // Authentication
+  register: (payload) => ipcRenderer.invoke('auth:register', payload),
+  login: (payload) => ipcRenderer.invoke('auth:login', payload),
+  validateSession: (payload) => ipcRenderer.invoke('auth:validate-session', payload),
+  logout: (payload) => ipcRenderer.invoke('auth:logout', payload),
+  getUser: (payload) => ipcRenderer.invoke('auth:get-user', payload),
+  // Document management
+  saveDocumentMetadata: (payload) => ipcRenderer.invoke('documents:save', payload),
+  getUserDocuments: (payload) => ipcRenderer.invoke('documents:get-user-documents', payload),
+  getAllDocuments: () => ipcRenderer.invoke('documents:get-all'),
+  getDocumentById: (payload) => ipcRenderer.invoke('documents:get-by-id', payload),
+  getDocumentByPath: (payload) => ipcRenderer.invoke('documents:get-by-path', payload),
+  deleteDocument: (payload) => ipcRenderer.invoke('documents:delete', payload),
+  searchDocuments: (payload) => ipcRenderer.invoke('documents:search', payload),
+  generateDocumentCover: (payload) => ipcRenderer.invoke('documents:generate-cover', payload),
 };
 
 contextBridge.exposeInMainWorld('api', api);
