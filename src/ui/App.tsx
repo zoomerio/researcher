@@ -23,6 +23,7 @@ import BackgroundColor from '../tiptap/BackgroundColor';
 import { MathEditingNode } from '../tiptap/MathEditingNode';
 import { GraphNode } from '../tiptap/GraphNode';
 import { IllustrationNode } from '../tiptap/IllustrationNode';
+import PageBreak from '../tiptap/PageBreak';
 import { AuthWrapper } from '../components/AuthWrapper';
 import { DocumentLibrary } from '../components/DocumentLibrary';
 import {
@@ -70,6 +71,7 @@ import {
   RiImageEditLine,
   RiPaintBrushLine,
   RiRulerLine,
+  RiSeparator,
 } from 'react-icons/ri';
 
 type DropdownItem = { key: string; label: string; icon?: ReactNode };
@@ -204,7 +206,7 @@ type Tab = {
   title: string;
   closable: boolean;
   type: 'home' | 'create' | 'doc';
-  mode?: 'edit' | 'description' | 'analysis'; // Mode for doc tabs
+  mode?: 'edit' | 'description' | 'analysis' | 'view'; // Mode for doc tabs
   data?: any;
   filePath?: string | null;
   scrollTop?: number;
@@ -276,6 +278,202 @@ declare global {
 }
 
 const uid = () => Math.random().toString(36).slice(2);
+
+// ViewMode component for read-only document display
+const ViewMode: React.FC<{
+  meta: DocMeta;
+  content: string;
+  analysisData: AnalysisData;
+  tabData: any;
+}> = ({ meta, content, analysisData, tabData }) => {
+  
+  const generateViewModeHtml = () => {
+    // Get author info from document file, not localStorage
+    const author = tabData?.author;
+    
+    // Debug logging (remove in production)
+    console.log('[ViewMode] Debug info:', {
+      meta,
+      content,
+      analysisData,
+      tabData,
+      author
+    });
+    
+    // Title page content (only if we have a title)
+    let html = '';
+    if (meta.title) {
+      html += `
+        <div class="title-page">
+          <h1 style="text-align: center;">${meta.title}</h1>
+          <p style="text-align: center;">Автор: ${author?.fullName || 'Не указан'}</p>
+          <p style="text-align: center;">Группа: ${author?.groupId || 'Не указана'}</p>
+        </div>
+        <div data-type="page-break" class="page-break"></div>
+      `;
+    }
+    
+    // Research structure - only add sections that have content
+    let structureContent = '';
+    
+    if (meta.goals && meta.goals.trim()) {
+      structureContent += `
+        <h2>Цели</h2>
+        <ul>
+          ${meta.goals.split('\n').map(line => line.trim()).filter(line => line).map(line => `<li>${line}</li>`).join('')}
+        </ul>
+      `;
+    }
+    
+    if (meta.hypotheses && meta.hypotheses.trim()) {
+      structureContent += `
+        <h2>Гипотезы</h2>
+        <ul>
+          ${meta.hypotheses.split('\n').map(line => line.trim()).filter(line => line).map(line => `<li>${line}</li>`).join('')}
+        </ul>
+      `;
+    }
+    
+    if (meta.plan && meta.plan.trim()) {
+      structureContent += `
+        <h2>Плановый ход работы</h2>
+        <ul>
+          ${meta.plan.split('\n').map(line => line.trim()).filter(line => line).map(line => `<li>${line}</li>`).join('')}
+        </ul>
+      `;
+    }
+    
+    // Add structure block with page break if we have any structure content
+    if (structureContent) {
+      html += `
+        <div class="research-structure">
+          ${structureContent}
+        </div>
+        <div data-type="page-break" class="page-break"></div>
+      `;
+    }
+    
+    // User content (main document content) - always add if we have content
+    if (content && content.trim() && content !== '<p></p>') {
+      html += `
+        <div class="user-content">
+          ${content}
+        </div>
+        <div data-type="page-break" class="page-break"></div>
+      `;
+    }
+    
+    // Analysis section - only add if we have analysis data
+    let analysisContent = '';
+    
+    if (analysisData.conclusions && analysisData.conclusions.trim()) {
+      analysisContent += `
+        <h2>Выводы</h2>
+        <div>${analysisData.conclusions}</div>
+      `;
+    }
+    
+    if (analysisData.goals && analysisData.goals.length > 0) {
+      analysisContent += `
+        <h2>Цели</h2>
+        <div>
+          ${analysisData.goals.map(item => `
+              <div class="analysis-item-view">
+                <span class="checkbox-unicode">${item.completed ? '☑' : '☐'}</span>
+                <span>${item.text}</span>
+              </div>
+            `).join('')}
+        </div>
+      `;
+    }
+    
+    if (analysisData.hypotheses && analysisData.hypotheses.length > 0) {
+      analysisContent += `
+        <h2>Гипотезы</h2>
+        <div>
+          ${analysisData.hypotheses.map(item => `
+              <div class="analysis-item-view">
+                <span class="checkbox-unicode">${item.completed ? '☑' : '☐'}</span>
+                <span>${item.text}</span>
+              </div>
+            `).join('')}
+        </div>
+      `;
+    }
+    
+    if (analysisData.plan && analysisData.plan.length > 0) {
+      analysisContent += `
+        <h2>Плановый ход работы</h2>
+        <div>
+          ${analysisData.plan.map(item => `
+              <div class="analysis-item-view">
+                <span class="checkbox-unicode">${item.completed ? '☑' : '☐'}</span>
+                <span>${item.text}</span>
+              </div>
+            `).join('')}
+        </div>
+      `;
+    }
+    
+    // Add analysis block if we have any analysis content
+    if (analysisContent) {
+      html += `
+        <div class="analysis-section-view">
+          ${analysisContent}
+        </div>
+      `;
+    }
+    
+    console.log('[ViewMode] Generated HTML:', html);
+    return html || '<p>Документ пуст</p>';
+  };
+
+  // Create a read-only TipTap editor for proper formatting
+  const viewEditor = useEditor({
+    extensions: [
+      StarterKit,
+      TextAlign.configure({
+        types: ['heading', 'paragraph'],
+      }),
+      TextStyle,
+      FontSize,
+      Color,
+      BackgroundColor,
+      Underline,
+      Highlight,
+      FontFamily,
+      CodeBlock,
+      Subscript,
+      Superscript,
+      Image,
+      Mathematics.configure({
+        katexOptions: {
+          throwOnError: false,
+          errorColor: '#cc0000',
+          strict: 'warn'
+        }
+      }),
+      MathEditingNode,
+      GraphNode,
+      IllustrationNode,
+      PageBreak,
+      TableWithExtras.configure({
+        resizable: true,
+      }),
+      TableRow,
+      TableHeader,
+      TableCell,
+    ],
+    content: generateViewModeHtml(),
+    editable: false, // Read-only
+  });
+
+  return (
+    <div className="view-mode">
+      <EditorContent editor={viewEditor} />
+    </div>
+  );
+};
 
 const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void }> = ({ user, sessionToken, logout }) => {
   const [activeTabId, setActiveTabId] = useState<string>('home');
@@ -390,6 +588,15 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId), [tabs, activeTabId]);
 
+  // Expose app state to window for menu access
+  useEffect(() => {
+    (window as any).appState = {
+      activeTab,
+      tabs,
+      activeTabId
+    };
+  }, [activeTab, tabs, activeTabId]);
+
   // Editor must be declared before any useEffect/useRef that references it
   const editor = useEditor({
     onCreate: ({ editor: currentEditor }) => {
@@ -422,6 +629,7 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
       MathEditingNode,
       GraphNode,
       IllustrationNode,
+      PageBreak,
       Mathematics.configure({
         katexOptions: {
           throwOnError: false,
@@ -1083,10 +1291,14 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
     if (!(window as any).api) return;
     window.api.onMenuNew(() => openCreateTab());
     window.api.onMenuSave(async () => {
-      if (activeTabRef.current?.type === 'doc') await saveRef.current();
+      if (activeTabRef.current?.type === 'doc' && activeTabRef.current?.mode === 'edit') {
+        await saveRef.current();
+      }
     });
     window.api.onMenuSaveAs(async () => {
-      if (activeTabRef.current?.type === 'doc') await saveAsRef.current();
+      if (activeTabRef.current?.type === 'doc' && activeTabRef.current?.mode === 'edit') {
+        await saveAsRef.current();
+      }
     });
     window.api.onFileOpened(({ filePath, data }: any) => openLoadedDoc(data, filePath));
     window.api.onExternalOpenTab((payload: any) => {
@@ -1187,7 +1399,7 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
       const currentId = getCurrentActiveId();
       const insertAfter = prev.findIndex((t) => t.id === currentId);
       const nextTabs = [...prev];
-      const newTab: Tab = { id, title: meta.title || 'Документ', closable: true, type: 'doc', mode: 'edit', data: { meta, contentHtml: data.contentHtml || '<p></p>' }, filePath: filePath || null };
+      const newTab: Tab = { id, title: meta.title || 'Документ', closable: true, type: 'doc', mode: 'edit', data: { meta, contentHtml: data.contentHtml || '<p></p>', author: data.author }, filePath: filePath || null };
       const insertIndex = Math.min(Math.max(insertAfter + 1, 0), nextTabs.length);
       nextTabs.splice(insertIndex, 0, newTab);
       return nextTabs;
@@ -1296,14 +1508,13 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
         switchTabMode(tabId, 'analysis');
         break;
       case 'view':
-        // TODO: Implement view mode
-        console.log('View mode not implemented yet');
+        switchTabMode(tabId, 'view');
         break;
     }
   }
 
   // Switch tab mode
-  function switchTabMode(tabId: string, mode: 'edit' | 'description' | 'analysis') {
+  function switchTabMode(tabId: string, mode: 'edit' | 'description' | 'analysis' | 'view') {
     const tab = tabs.find(t => t.id === tabId);
     
     if (mode === 'description' && tab?.type === 'doc') {
@@ -1342,6 +1553,41 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
       };
 
       // Use current docMeta state (which has the latest edits) instead of stored meta
+      const analysisData: AnalysisData = {
+        conclusions: existingAnalysis?.conclusions || '',
+        goals: mergeAnalysisItems(docMeta.goals, existingAnalysis?.goals),
+        hypotheses: mergeAnalysisItems(docMeta.hypotheses, existingAnalysis?.hypotheses),
+        plan: mergeAnalysisItems(docMeta.plan, existingAnalysis?.plan)
+      };
+      
+      setTempAnalysisData(analysisData);
+    } else if (mode === 'view' && tab?.type === 'doc') {
+      // When entering view mode, initialize temp states with current data
+      const currentMeta = tab.data?.meta as DocMeta;
+      setTempDescriptionMeta({ ...currentMeta });
+      
+      // Initialize analysis data for view mode
+      const existingAnalysis = currentMeta.analysis;
+      const parseTextToItems = (text: string): AnalysisItem[] => {
+        if (!text.trim()) return [];
+        return text.split('\n').filter(line => line.trim()).map(line => ({
+          text: line.trim(),
+          completed: false
+        }));
+      };
+
+      const mergeAnalysisItems = (newText: string, existingItems: AnalysisItem[] = []): AnalysisItem[] => {
+        const newItems = parseTextToItems(newText);
+        const completionMap = new Map<string, boolean>();
+        existingItems.forEach(item => {
+          completionMap.set(item.text, item.completed);
+        });
+        return newItems.map(newItem => ({
+          text: newItem.text,
+          completed: completionMap.get(newItem.text) || false
+        }));
+      };
+
       const analysisData: AnalysisData = {
         conclusions: existingAnalysis?.conclusions || '',
         goals: mergeAnalysisItems(docMeta.goals, existingAnalysis?.goals),
@@ -1691,7 +1937,8 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
       ));
 
       console.log('[SaveAsRef] Calling saveDocumentAs with jsonData...');
-      const res = await window.api.saveDocumentAs({ jsonData, asXml: false });
+      const defaultFilename = meta.title ? `${meta.title}.rsrch` : 'document.rsrch';
+      const res = await window.api.saveDocumentAs({ defaultPath: defaultFilename, jsonData, asXml: false });
       console.log('[SaveAsRef] File save result:', res);
       if (!res?.canceled) {
         console.log('[SaveAsRef] File save successful, proceeding with metadata save...');
@@ -1791,7 +2038,8 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
     }
 
     console.log('[SaveAs] Calling saveDocumentAs with jsonData...');
-    const res = await window.api.saveDocumentAs({ jsonData, asXml: false });
+    const defaultFilename = docMeta.title ? `${docMeta.title}.rsrch` : 'document.rsrch';
+    const res = await window.api.saveDocumentAs({ defaultPath: defaultFilename, jsonData, asXml: false });
     console.log('[SaveAs] File save result:', res);
     if (!res?.canceled) {
       console.log('[SaveAs] File save successful, proceeding with metadata save...');
@@ -2006,10 +2254,10 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
                   Анализ {currentMode === 'analysis' ? '✓' : ''}
                 </button>
                 <button 
-                  className="context-menu-item"
+                  className={`context-menu-item ${currentMode === 'view' ? 'active' : ''}`}
                   onClick={() => handleContextMenuAction('view', contextMenu.tabId)}
                 >
-                  Просмотр
+                  Просмотр {currentMode === 'view' ? '✓' : ''}
                 </button>
               </>
             );
@@ -2195,6 +2443,15 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
             </div>
           )}
 
+          {activeTab?.type === 'doc' && activeTab?.mode === 'view' && (
+            <ViewMode 
+              meta={tempDescriptionMeta || {title: '', description: '', goals: '', hypotheses: '', plan: ''}}
+              content={activeTab?.data?.contentHtml || activeTab?.data?.content || ''}
+              analysisData={tempAnalysisData || {conclusions: '', goals: [], hypotheses: [], plan: []}}
+              tabData={activeTab?.data}
+            />
+          )}
+
           {activeTab?.type === 'doc' && activeTab?.mode === 'edit' && (
             <div>
               <div className={`sticky-tools ${activeTool ? 'has-active' : 'no-active'}`}>
@@ -2371,6 +2628,8 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
                     <button className={`tool ${editor?.isActive('codeBlock') ? 'active' : ''}`} title="Блок кода" onClick={() => editor?.chain().focus().toggleCodeBlock().run()}><RiCodeBoxLine /></button>
                     {/* Image (kept here) */}
                     <button className="tool" title="Вставить изображение" onClick={async () => { const r = await window.api.pickImage(); if (!r?.canceled && (r as any).dataUrl) editor?.chain().focus().setImage({ src: (r as any).dataUrl }).run(); }}><RiImageLine /></button>
+                    {/* Page Break */}
+                    <button className="tool" title="Разрыв страницы (Ctrl+Enter)" onClick={() => editor?.chain().focus().setPageBreak().run()}><RiSeparator /></button>
                   </div>
                   <div className="tool-sep" aria-hidden="true" />
                   {/* Group: Sub/Superscript */}

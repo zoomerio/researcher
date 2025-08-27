@@ -46,7 +46,7 @@ export function Register({ onRegisterSuccess, onSwitchToLogin }: RegisterProps) 
     }
 
     if (!formData.groupId.trim()) {
-      setError('ID группы обязателен для заполнения');
+      setError('Номер группы обязателен для заполнения');
       return false;
     }
 
@@ -132,14 +132,14 @@ export function Register({ onRegisterSuccess, onSwitchToLogin }: RegisterProps) 
           </div>
 
           <div className="form-group">
-            <label htmlFor="groupId">ID группы *</label>
+            <label htmlFor="groupId">Номер группы *</label>
             <input
               type="text"
               id="groupId"
               name="groupId"
               value={formData.groupId}
               onChange={handleInputChange}
-              placeholder="Введите ID группы"
+              placeholder="Введите номер группы"
               disabled={isLoading}
             />
           </div>

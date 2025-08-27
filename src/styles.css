@@ -23,6 +23,123 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
 .a4-canvas:focus { outline: none !important; box-shadow: none !important; }
 .ProseMirror:focus { outline: none !important; box-shadow: none !important; }
 
+/* Page Break Styles */
+.page-break {
+  position: relative;
+  margin: 20px 0;
+  padding: 10px 0;
+  text-align: center;
+  user-select: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.page-break:hover {
+  background-color: rgba(34, 211, 238, 0.05);
+}
+
+.page-break-line {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.page-break-line::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  background: var(--panel);
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+}
+
+.page-break-line::after {
+  content: '✂';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.page-break-text {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.page-break.ProseMirror-selectednode {
+  background-color: rgba(34, 211, 238, 0.1);
+}
+
+.page-break.ProseMirror-selectednode .page-break-line {
+  background: linear-gradient(90deg, transparent, #22d3ee, transparent);
+}
+
+.page-break.ProseMirror-selectednode .page-break-text {
+  color: var(--accent);
+}
+
+/* Print-specific styles for PDF export */
+@media print {
+  /* Hide UI elements */
+  .tool-tabs {
+    display: none !important;
+  }
+  
+  /* Hide cursor and selection indicators - comprehensive approach */
+  .ProseMirror-cursor,
+  .ProseMirror-selection,
+  .ProseMirror-selectednode,
+  .ProseMirror-gapcursor,
+  .ProseMirror-dropcursor,
+  .ProseMirror-widget,
+  .ProseMirror-decoration,
+  .ProseMirror::after,
+  .ProseMirror::before {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+  
+  /* Remove any cursor/caret from contenteditable elements */
+  *[contenteditable="true"] {
+    caret-color: transparent !important;
+  }
+  
+  /* Hide any blinking cursor */
+  * {
+    caret-color: transparent !important;
+  }
+  
+  /* Page break handling */
+  .page-break, [data-type="page-break"] {
+    page-break-before: always !important;
+    page-break-after: avoid !important;
+    display: block !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    visibility: hidden !important;
+  }
+  
+  .page-break-line, .page-break-text {
+    display: none !important;
+  }
+}
+
 .app-shell { display: grid; height: 100vh; grid-template-rows: 44px 1fr; }
 .app-shell.with-sidebar { grid-template-columns: 220px 1fr; grid-template-areas: "tabs tabs" "sidebar content"; }
 .app-shell.no-sidebar { grid-template-columns: 1fr; grid-template-areas: "tabs" "content"; }
@@ -733,7 +850,13 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
 }
 
 /* Ensure editor content never creates horizontal scroll inside the A4 sheet */
-.a4-canvas .ProseMirror { width: 100%; max-width: 100%; box-sizing: border-box; }
+.a4-canvas .ProseMirror { 
+  width: 100%; 
+  max-width: 100%; 
+  box-sizing: border-box; 
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
 
 .section-title {
   color: var(--muted);
@@ -1499,6 +1622,241 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   border: 1px dashed #1f2937;
   border-radius: 8px;
   margin: 10px 0;
+}
+
+/* View Mode Styles */
+.view-mode {
+  margin: 0 auto;
+  width: 794px; /* Match A4 canvas width exactly */
+  background: white;
+  color: #000;
+  line-height: 1.6;
+  padding: 32px; /* Match A4 canvas padding exactly - VIEW mode should look like EDIT mode */
+  border-radius: 8px;
+  box-sizing: border-box; /* Ensure padding is included in width */
+  /* Remove box-shadow to prevent PDF shadow issues */
+}
+
+/* Ensure view mode content has proper text wrapping */
+.view-mode .ProseMirror {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+
+.title-page {
+  padding: 40mm 0;
+  box-sizing: border-box;
+}
+
+.title-page-content {
+  width: 100%;
+}
+
+.research-title {
+  font-size: 24px;
+  font-weight: bold;
+  margin-bottom: 60px;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.author-info {
+  margin-top: 80px;
+}
+
+.author-info p {
+  margin-bottom: 20px;
+  font-size: 16px;
+}
+
+.page-break {
+  page-break-before: always;
+  break-before: page;
+  height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.research-structure,
+.user-content,
+.analysis-section-view {
+  padding: 20mm;
+  box-sizing: border-box;
+}
+
+.structure-section,
+.analysis-subsection {
+  margin-bottom: 30px;
+}
+
+.structure-section h2,
+.user-content h2,
+.analysis-section-view h2,
+.analysis-subsection h3 {
+  color: #000;
+  font-weight: bold;
+  margin-bottom: 15px;
+  text-align: left;
+}
+
+.structure-section h2,
+.user-content h2,
+.analysis-section-view h2 {
+  font-size: 18px;
+}
+
+.analysis-subsection h3 {
+  font-size: 16px;
+  margin-top: 25px;
+}
+
+.structure-content,
+.analysis-content {
+  margin-left: 20px;
+}
+
+.structure-content ul,
+.analysis-checklist {
+  list-style-type: decimal;
+  padding-left: 20px;
+  margin: 10px 0;
+}
+
+.structure-content li,
+.analysis-item {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.analysis-checklist {
+  list-style-type: none;
+  padding-left: 0;
+}
+
+.analysis-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.analysis-item-view {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.analysis-item-view input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.analysis-item-view span {
+  line-height: 1.5;
+}
+
+.checkbox-unicode {
+  font-size: 16px;
+  font-weight: bold;
+  color: #007acc;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.checkbox {
+  font-size: 16px;
+  font-weight: bold;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+
+.checkbox.checked {
+  color: #008000;
+}
+
+.item-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.content-html {
+  color: #000;
+  line-height: 1.6;
+}
+
+.content-html h1,
+.content-html h2,
+.content-html h3,
+.content-html h4,
+.content-html h5,
+.content-html h6 {
+  color: #000;
+  font-weight: bold;
+  margin: 20px 0 10px 0;
+}
+
+.content-html p {
+  margin-bottom: 12px;
+  text-align: justify;
+}
+
+.content-html ul,
+.content-html ol {
+  margin: 10px 0;
+  padding-left: 30px;
+}
+
+.content-html li {
+  margin-bottom: 5px;
+}
+
+.content-html table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 15px 0;
+}
+
+.content-html th,
+.content-html td {
+  border: 1px solid #000;
+  padding: 8px;
+  text-align: left;
+}
+
+.content-html th {
+  background-color: #f0f0f0;
+  font-weight: bold;
+}
+
+.no-content {
+  color: #666;
+  font-style: italic;
+  margin: 10px 0;
+}
+
+/* Print styles for view mode */
+@media print {
+  .view-mode {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+  
+  .title-page,
+  .research-structure,
+  .user-content,
+  .analysis-section-view {
+    padding: 15mm;
+  }
+  
+  .page-break {
+    page-break-before: always;
+  }
 }
 
 /* Authentication styles */

@@ -15,6 +15,7 @@ import { processPriorityManager } from './processPriorityManager.js';
 import { memoryConfig } from './memoryConfig.js';
 import { userDatabase } from './database.js';
 import { generateDocumentCover } from './documentCover.js';
+import { exportPdfWithPageBreaks } from './simplePdfExport.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -198,30 +199,44 @@ function buildMenu() {
             }
         }},
         { type: 'separator' },
-        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => (lastFocusedWindow || mainWindow)?.webContents.send('menu:save') },
-        { label: 'Save As…', accelerator: 'CmdOrCtrl+Shift+S', click: () => (lastFocusedWindow || mainWindow)?.webContents.send('menu:saveAs') },
+        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => {
+            const targetWin = lastFocusedWindow || mainWindow;
+            targetWin?.webContents.send('menu:save');
+        }},
+        { label: 'Save As…', accelerator: 'CmdOrCtrl+Shift+S', click: () => {
+            const targetWin = lastFocusedWindow || mainWindow;
+            targetWin?.webContents.send('menu:saveAs');
+        }},
         { type: 'separator' },
         { label: 'Export PDF', click: async () => {
+            console.log('[Menu] PDF export clicked');
             const targetWin = lastFocusedWindow || mainWindow;
-            if (!targetWin) return;
-            try {
-              const pdf = await targetWin.webContents.printToPDF({
-                landscape: false,
-                marginsType: 0,
-                pageSize: 'A4',
-                printBackground: true,
-                scaleFactor: 100,
+            console.log('[Menu] Target window:', !!targetWin);
+            
+            // Check if we're in document editing mode
+            const canExport = await targetWin?.webContents.executeJavaScript(`
+              (() => {
+                // Check if we have access to the app state
+                if (typeof window !== 'undefined' && window.appState) {
+                  const activeTab = window.appState.activeTab;
+                  return activeTab && activeTab.type === 'doc' && (activeTab.mode === 'edit' || activeTab.mode === 'view');
+                }
+                return false;
+              })()
+            `);
+            
+            if (!canExport) {
+              dialog.showMessageBox(targetWin, {
+                type: 'info',
+                title: 'PDF Export',
+                message: 'PDF export is only available in document editing or view mode.',
+                buttons: ['OK']
               });
-              const { canceled, filePath } = await dialog.showSaveDialog({
-                title: 'Экспорт в PDF',
-                defaultPath: 'document.pdf',
-                filters: [{ name: 'PDF', extensions: ['pdf'] }],
-              });
-              if (canceled || !filePath) return;
-              await fs.writeFile(filePath, pdf);
-            } catch (err) {
-              dialog.showErrorBox('Ошибка', 'Не удалось экспортировать PDF');
+              return;
             }
+            
+            const result = await exportPdfWithPageBreaks(targetWin);
+            console.log('[Menu] PDF export result:', result);
         }},
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' }
@@ -509,28 +524,30 @@ ipcMain.handle('file:open-path', async (_event, filePath) => {
 });
 
 ipcMain.handle('export:pdf', async () => {
+  console.log('[Main] PDF export requested');
   const targetWin = lastFocusedWindow || mainWindow;
-  if (!targetWin) return { canceled: true };
-  try {
-    const pdf = await targetWin.webContents.printToPDF({
-      landscape: false,
-      marginsType: 0,
-      pageSize: 'A4',
-      printBackground: true,
-      scaleFactor: 100,
-    });
-    const { canceled, filePath } = await dialog.showSaveDialog({
-      title: 'Экспорт в PDF',
-      defaultPath: 'document.pdf',
-      filters: [{ name: 'PDF', extensions: ['pdf'] }],
-    });
-    if (canceled || !filePath) return { canceled: true };
-    await fs.writeFile(filePath, pdf);
-    return { canceled: false, filePath };
-  } catch (err) {
-    dialog.showErrorBox('Ошибка', 'Не удалось экспортировать PDF');
-    return { canceled: true };
+  console.log('[Main] Target window:', !!targetWin);
+  
+  // Check if we're in document editing mode
+  const canExport = await targetWin?.webContents.executeJavaScript(`
+    (() => {
+      // Check if we have access to the app state
+      if (typeof window !== 'undefined' && window.appState) {
+        const activeTab = window.appState.activeTab;
+        return activeTab && activeTab.type === 'doc' && (activeTab.mode === 'edit' || activeTab.mode === 'view');
+      }
+      return false;
+    })()
+  `);
+  
+  if (!canExport) {
+    console.log('[Main] PDF export denied - not in document editing mode');
+    return { canceled: true, error: 'PDF export is only available in document editing mode.' };
   }
+  
+  const result = await exportPdfWithPageBreaks(targetWin);
+  console.log('[Main] PDF export result:', result);
+  return result;
 });
 
 // Detach a tab into a new window
