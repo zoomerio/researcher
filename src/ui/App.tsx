@@ -23,6 +23,12 @@ import BackgroundColor from '../tiptap/BackgroundColor';
 import { MathEditingNode } from '../tiptap/MathEditingNode';
 import { GraphNode } from '../tiptap/GraphNode';
 import { IllustrationNode } from '../tiptap/IllustrationNode';
+import PageBreak from '../tiptap/PageBreak';
+import { AuthWrapper } from '../components/AuthWrapper';
+import { DocumentLibrary } from '../components/DocumentLibrary';
+import { UsersList } from '../components/UsersList';
+import { RecentDocuments } from '../components/RecentDocuments';
+import { ProfileModal } from '../components/ProfileModal';
 import {
   RiBold,
   RiItalic,
@@ -68,6 +74,7 @@ import {
   RiImageEditLine,
   RiPaintBrushLine,
   RiRulerLine,
+  RiSeparator,
 } from 'react-icons/ri';
 
 type DropdownItem = { key: string; label: string; icon?: ReactNode };
@@ -202,9 +209,22 @@ type Tab = {
   title: string;
   closable: boolean;
   type: 'home' | 'create' | 'doc';
+  mode?: 'edit' | 'description' | 'analysis' | 'view'; // Mode for doc tabs
   data?: any;
   filePath?: string | null;
   scrollTop?: number;
+};
+
+type AnalysisItem = {
+  text: string;
+  completed: boolean;
+};
+
+type AnalysisData = {
+  conclusions: string;
+  goals: AnalysisItem[];
+  hypotheses: AnalysisItem[];
+  plan: AnalysisItem[];
 };
 
 type DocMeta = {
@@ -213,6 +233,7 @@ type DocMeta = {
   goals: string;
   hypotheses: string;
   plan: string;
+  analysis?: AnalysisData;
 };
 
 declare global {
@@ -240,18 +261,241 @@ declare global {
         onExternalDragEnd: (cb: () => void) => void;
         closeSelf: () => Promise<any>;
         pickImage: () => Promise<{ canceled: boolean; filePath?: string }>;
+        // Authentication
+        register: (payload: { username: string; fullName: string; groupId: string; password: string }) => Promise<any>;
+        login: (payload: { username: string; password: string }) => Promise<any>;
+        validateSession: (payload: { sessionToken: string }) => Promise<any>;
+        logout: (payload: { sessionToken: string }) => Promise<any>;
+        getUser: (payload: { userId: number }) => Promise<any>;
+        // Document management
+        saveDocumentMetadata: (payload: { documentData: any; authorData: any; filePath: string; coverImagePath?: string }) => Promise<any>;
+        getUserDocuments: (payload: { userId: number }) => Promise<any>;
+        getAllDocuments: () => Promise<any>;
+        getDocumentById: (payload: { documentId: number }) => Promise<any>;
+        getDocumentByPath: (payload: { filePath: string }) => Promise<any>;
+        deleteDocument: (payload: { documentId: number; userId: number }) => Promise<any>;
+        searchDocuments: (payload: { query: string; userId?: number }) => Promise<any>;
+        generateDocumentCover: (payload: { htmlContent: string; filePath: string; oldCoverPath?: string }) => Promise<any>;
     };
   }
 }
 
 const uid = () => Math.random().toString(36).slice(2);
 
-export const App: React.FC = () => {
+// ViewMode component for read-only document display
+const ViewMode: React.FC<{
+  meta: DocMeta;
+  content: string;
+  analysisData: AnalysisData;
+  tabData: any;
+}> = ({ meta, content, analysisData, tabData }) => {
+  
+  const generateViewModeHtml = () => {
+    // Get author info from document file, not localStorage
+    const author = tabData?.author;
+    
+    // Debug logging (remove in production)
+    console.log('[ViewMode] Debug info:', {
+      meta,
+      content,
+      analysisData,
+      tabData,
+      author
+    });
+    
+    // Title page content (only if we have a title)
+    let html = '';
+    if (meta.title) {
+      html += `
+        <div class="title-page">
+          <h1 style="text-align: center;">${meta.title}</h1>
+          <p style="text-align: center;">Автор: ${author?.fullName || 'Не указан'}</p>
+          <p style="text-align: center;">Группа: ${author?.groupId || 'Не указана'}</p>
+        </div>
+        <div data-type="page-break" class="page-break"></div>
+      `;
+    }
+    
+    // Research structure - only add sections that have content
+    let structureContent = '';
+    
+    if (meta.goals && meta.goals.trim()) {
+      structureContent += `
+        <h2>Цели</h2>
+        <ul>
+          ${meta.goals.split('\n').map(line => line.trim()).filter(line => line).map(line => `<li>${line}</li>`).join('')}
+        </ul>
+      `;
+    }
+    
+    if (meta.hypotheses && meta.hypotheses.trim()) {
+      structureContent += `
+        <h2>Гипотезы</h2>
+        <ul>
+          ${meta.hypotheses.split('\n').map(line => line.trim()).filter(line => line).map(line => `<li>${line}</li>`).join('')}
+        </ul>
+      `;
+    }
+    
+    if (meta.plan && meta.plan.trim()) {
+      structureContent += `
+        <h2>Плановый ход работы</h2>
+        <ul>
+          ${meta.plan.split('\n').map(line => line.trim()).filter(line => line).map(line => `<li>${line}</li>`).join('')}
+        </ul>
+      `;
+    }
+    
+    // Add structure block with page break if we have any structure content
+    if (structureContent) {
+      html += `
+        <div class="research-structure">
+          ${structureContent}
+        </div>
+        <div data-type="page-break" class="page-break"></div>
+      `;
+    }
+    
+    // User content (main document content) - always add if we have content
+    if (content && content.trim() && content !== '<p></p>') {
+      html += `
+        <div class="user-content">
+          ${content}
+        </div>
+        <div data-type="page-break" class="page-break"></div>
+      `;
+    }
+    
+    // Analysis section - only add if we have analysis data
+    let analysisContent = '';
+    
+    if (analysisData.conclusions && analysisData.conclusions.trim()) {
+      analysisContent += `
+        <h2>Выводы</h2>
+        <div>${analysisData.conclusions}</div>
+      `;
+    }
+    
+    if (analysisData.goals && analysisData.goals.length > 0) {
+      analysisContent += `
+        <h2>Цели</h2>
+        <div>
+          ${analysisData.goals.map(item => `
+              <div class="analysis-item-view">
+                <span class="checkbox-unicode">${item.completed ? '☑' : '☐'}</span>
+                <span>${item.text}</span>
+              </div>
+            `).join('')}
+        </div>
+      `;
+    }
+    
+    if (analysisData.hypotheses && analysisData.hypotheses.length > 0) {
+      analysisContent += `
+        <h2>Гипотезы</h2>
+        <div>
+          ${analysisData.hypotheses.map(item => `
+              <div class="analysis-item-view">
+                <span class="checkbox-unicode">${item.completed ? '☑' : '☐'}</span>
+                <span>${item.text}</span>
+              </div>
+            `).join('')}
+        </div>
+      `;
+    }
+    
+    if (analysisData.plan && analysisData.plan.length > 0) {
+      analysisContent += `
+        <h2>Плановый ход работы</h2>
+        <div>
+          ${analysisData.plan.map(item => `
+              <div class="analysis-item-view">
+                <span class="checkbox-unicode">${item.completed ? '☑' : '☐'}</span>
+                <span>${item.text}</span>
+              </div>
+            `).join('')}
+        </div>
+      `;
+    }
+    
+    // Add analysis block if we have any analysis content
+    if (analysisContent) {
+      html += `
+        <div class="analysis-section-view">
+          ${analysisContent}
+        </div>
+      `;
+    }
+    
+    console.log('[ViewMode] Generated HTML:', html);
+    return html || '<p>Документ пуст</p>';
+  };
+
+  // Create a read-only TipTap editor for proper formatting
+  const viewEditor = useEditor({
+    extensions: [
+      StarterKit,
+      TextAlign.configure({
+        types: ['heading', 'paragraph'],
+      }),
+      TextStyle,
+      FontSize,
+      Color,
+      BackgroundColor,
+      Underline,
+      Highlight,
+      FontFamily,
+      CodeBlock,
+      Subscript,
+      Superscript,
+      Image,
+      Mathematics.configure({
+        katexOptions: {
+          throwOnError: false,
+          errorColor: '#cc0000',
+          strict: 'warn'
+        }
+      }),
+      MathEditingNode,
+      GraphNode,
+      IllustrationNode,
+      PageBreak,
+      TableWithExtras.configure({
+        resizable: true,
+      }),
+      TableRow,
+      TableHeader,
+      TableCell,
+    ],
+    content: generateViewModeHtml(),
+    editable: false, // Read-only
+  });
+
+  // Update editor content when props change
+  React.useEffect(() => {
+    if (viewEditor) {
+      const newContent = generateViewModeHtml();
+      viewEditor.commands.setContent(newContent);
+    }
+  }, [viewEditor, meta, content, analysisData, tabData]);
+
+  return (
+    <div className="view-mode">
+      <EditorContent editor={viewEditor} />
+    </div>
+  );
+};
+
+const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void }> = ({ user, sessionToken, logout }) => {
   const [activeTabId, setActiveTabId] = useState<string>('home');
   const [tabs, setTabs] = useState<Tab[]>([
     { id: 'home', title: 'Начало', closable: false, type: 'home' },
   ]);
-  const [sidebarView, setSidebarView] = useState<'users' | 'research' | 'recent'>('users');
+  const [sidebarView, setSidebarView] = useState<'users' | 'research' | 'recent'>('recent');
+  const [recentDocuments, setRecentDocuments] = useState<string[]>([]);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [unsavedChanges, setUnsavedChanges] = useState<Set<string>>(new Set());
+  const [originalContent, setOriginalContent] = useState<Map<string, string>>(new Map());
 
   const [docMeta, setDocMeta] = useState<DocMeta>({
     title: '',
@@ -275,6 +519,142 @@ export const App: React.FC = () => {
     mathType: 'inline' | 'block';
     originalLatex: string;
   } | null>(null);
+  
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    tabId: string;
+  } | null>(null);
+
+  // Temporary state for description editing (per-tab, not saved until user clicks Save)
+  const [tempDescriptionMeta, setTempDescriptionMeta] = useState<Map<string, DocMeta>>(new Map());
+  
+  // Temporary state for analysis editing (per-tab)
+  const [tempAnalysisData, setTempAnalysisData] = useState<Map<string, AnalysisData>>(new Map());
+  
+  // Recent documents management
+  const addToRecentDocuments = (filePath: string) => {
+    setRecentDocuments(prev => {
+      const updated = [filePath, ...prev.filter(path => path !== filePath)].slice(0, 5);
+      // Save to localStorage
+      localStorage.setItem(`recentDocuments_${user.id}`, JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Load recent documents on component mount
+  React.useEffect(() => {
+    const saved = localStorage.getItem(`recentDocuments_${user.id}`);
+    if (saved) {
+      try {
+        setRecentDocuments(JSON.parse(saved));
+      } catch (error) {
+        console.error('Failed to load recent documents:', error);
+      }
+    }
+  }, [user.id]);
+
+  // Track content changes
+  const trackContentChange = (tabId: string, currentContent: string) => {
+    const original = originalContent.get(tabId);
+    if (original && original !== currentContent) {
+      setUnsavedChanges(prev => new Set(prev).add(tabId));
+    } else if (original && original === currentContent) {
+      setUnsavedChanges(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(tabId);
+        return newSet;
+      });
+    }
+  };
+
+  // Set original content when document is loaded
+  const setOriginalContentForTab = (tabId: string, content: string) => {
+    setOriginalContent(prev => new Map(prev).set(tabId, content));
+    // Remove from unsaved changes when setting original content
+    setUnsavedChanges(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(tabId);
+      return newSet;
+    });
+  };
+
+  // Check if tab has unsaved changes
+  const hasUnsavedChanges = (tabId: string) => {
+    return unsavedChanges.has(tabId);
+  };
+
+  // Handle tab close with confirmation
+  const handleTabClose = async (tabId: string): Promise<boolean> => {
+    if (!hasUnsavedChanges(tabId)) {
+      return true; // Allow close
+    }
+
+    const tab = tabs.find(t => t.id === tabId);
+    const result = await showSaveConfirmation(tab?.title || 'Документ');
+    
+    if (result === 'save') {
+      // Try to save the document
+      const saved = await saveCurrentDocument();
+      if (saved) {
+        // Clear unsaved changes after successful save
+        setUnsavedChanges(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(tabId);
+          return newSet;
+        });
+        return true;
+      }
+      return false; // Save failed, don't close
+    } else if (result === 'discard') {
+      // Clear unsaved changes and allow close
+      setUnsavedChanges(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(tabId);
+        return newSet;
+      });
+      return true;
+    }
+    
+    return false; // Cancel close
+  };
+
+  // Show save confirmation dialog
+  const showSaveConfirmation = (documentTitle: string): Promise<'save' | 'discard' | 'cancel'> => {
+    return new Promise((resolve) => {
+      const result = confirm(
+        `Документ "${documentTitle}" содержит несохранённые изменения.\n\n` +
+        `Нажмите "OK" чтобы сохранить изменения, или "Отмена" чтобы закрыть без сохранения.`
+      );
+      
+      if (result) {
+        resolve('save');
+      } else {
+        const discard = confirm(
+          `Вы уверены, что хотите закрыть документ без сохранения изменений?\n\n` +
+          `Все несохранённые изменения будут потеряны.`
+        );
+        resolve(discard ? 'discard' : 'cancel');
+      }
+    });
+  };
+
+  // Save current document and return success status
+  const saveCurrentDocument = async (): Promise<boolean> => {
+    if (!activeTab || activeTab.type !== 'doc') return false;
+    
+    try {
+      // Use the existing save function
+      await save();
+      return true;
+    } catch (error) {
+      console.error('Error saving document:', error);
+      return false;
+    }
+  };
+
   // detach is triggered by double-click now; DnD used for reorder and reattach only
 
   // Memory optimization: Periodically trigger garbage collection and cleanup
@@ -318,7 +698,40 @@ export const App: React.FC = () => {
     }
   }, [])
 
+  // Context menu click outside handler and keyboard support
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (contextMenu?.visible) {
+        setContextMenu(null);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (contextMenu?.visible && event.key === 'Escape') {
+        setContextMenu(null);
+      }
+    };
+
+    if (contextMenu?.visible) {
+      document.addEventListener('click', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+      return () => {
+        document.removeEventListener('click', handleClickOutside);
+        document.removeEventListener('keydown', handleKeyDown);
+      };
+    }
+  }, [contextMenu?.visible]);
+
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId), [tabs, activeTabId]);
+
+  // Expose app state to window for menu access
+  useEffect(() => {
+    (window as any).appState = {
+      activeTab,
+      tabs,
+      activeTabId
+    };
+  }, [activeTab, tabs, activeTabId]);
 
   // Editor must be declared before any useEffect/useRef that references it
   const editor = useEditor({
@@ -352,6 +765,7 @@ export const App: React.FC = () => {
       MathEditingNode,
       GraphNode,
       IllustrationNode,
+      PageBreak,
       Mathematics.configure({
         katexOptions: {
           throwOnError: false,
@@ -792,6 +1206,21 @@ export const App: React.FC = () => {
     };
   }, [editor]);
 
+  // Track editor content changes for unsaved changes detection
+  useEffect(() => {
+    if (!editor || !activeTab || activeTab.type !== 'doc') return;
+
+    const handleUpdate = () => {
+      const currentContent = editor.getHTML();
+      trackContentChange(activeTab.id, currentContent);
+    };
+
+    editor.on('update', handleUpdate);
+    return () => {
+      editor.off('update', handleUpdate);
+    };
+  }, [editor, activeTab]);
+
   // Debug Mathematics extension and handle math editing
   useEffect(() => {
     if (!editor) return;
@@ -1013,10 +1442,14 @@ export const App: React.FC = () => {
     if (!(window as any).api) return;
     window.api.onMenuNew(() => openCreateTab());
     window.api.onMenuSave(async () => {
-      if (activeTabRef.current?.type === 'doc') await saveRef.current();
+      if (activeTabRef.current?.type === 'doc' && activeTabRef.current?.mode === 'edit') {
+        await saveRef.current();
+      }
     });
     window.api.onMenuSaveAs(async () => {
-      if (activeTabRef.current?.type === 'doc') await saveAsRef.current();
+      if (activeTabRef.current?.type === 'doc' && activeTabRef.current?.mode === 'edit') {
+        await saveAsRef.current();
+      }
     });
     window.api.onFileOpened(({ filePath, data }: any) => openLoadedDoc(data, filePath));
     window.api.onExternalOpenTab((payload: any) => {
@@ -1029,8 +1462,9 @@ export const App: React.FC = () => {
         goals: data.goals || data?.meta?.goals || '',
         hypotheses: data.hypotheses || data?.meta?.hypotheses || '',
         plan: data.plan || data?.meta?.plan || '',
+        analysis: data.analysis || data?.meta?.analysis,
       };
-      setTabs([{ id, title: meta.title || 'Документ', closable: true, type: 'doc', data: { meta, contentHtml: data.contentHtml || '<p></p>' }, filePath: payload?.filePath || null }]);
+      setTabs([{ id, title: meta.title || 'Документ', closable: true, type: 'doc', mode: 'edit', data: { meta, contentHtml: data.contentHtml || '<p></p>' }, filePath: payload?.filePath || null }]);
       setActiveTabId(id);
     });
     window.api.onExternalReattachTab((payload: any) => {
@@ -1063,10 +1497,10 @@ export const App: React.FC = () => {
       return nextTabs;
     });
     setActiveTabSafely(id);
-    // reset meta for new doc creation
-    setDocMeta({ title: '', description: '', goals: '', hypotheses: '', plan: '' });
-    editor?.commands.setContent('<p></p>');
+    // Meta and editor content will be reset by useEffect when switching to create tab
   }
+
+
 
   function createDocument() {
     const id = uid();
@@ -1074,7 +1508,7 @@ export const App: React.FC = () => {
       const currentId = getCurrentActiveId();
       const createIndex = prev.findIndex((t) => t.id === currentId);
       const nextTabs = [...prev];
-      const newTab: Tab = { id, title: docMeta.title || 'Без названия', closable: true, type: 'doc', data: { meta: { ...docMeta }, contentHtml: '<p></p>' }, filePath: null };
+      const newTab: Tab = { id, title: docMeta.title || 'Без названия', closable: true, type: 'doc', mode: 'edit', data: { meta: { ...docMeta }, contentHtml: '<p></p>' }, filePath: null };
       const insertIndex = Math.min(Math.max(createIndex + 1, 0), nextTabs.length);
       nextTabs.splice(insertIndex, 0, newTab);
       // remove the create tab
@@ -1089,11 +1523,34 @@ export const App: React.FC = () => {
     setActiveTabSafely(id);
   }
 
-  function closeTab(id: string) {
+  async function closeTab(id: string) {
+    const canClose = await handleTabClose(id);
+    if (!canClose) return;
+
     setTabs((prev) => {
       const next = prev.filter((t) => t.id !== id || !t.closable);
       return next;
     });
+    
+    // Clean up tracking data and temporary states
+    setOriginalContent(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(id);
+      return newMap;
+    });
+    
+    setTempDescriptionMeta(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(id);
+      return newMap;
+    });
+    
+    setTempAnalysisData(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(id);
+      return newMap;
+    });
+    
     if (activeTabId === id) {
       const nextTabs = tabs.filter((t) => t.id !== id || !t.closable);
       const home = nextTabs.find((t) => t.type === 'home');
@@ -1110,17 +1567,20 @@ export const App: React.FC = () => {
       goals: data.goals || '',
       hypotheses: data.hypotheses || '',
       plan: data.plan || '',
+      analysis: data.analysis,
     };
     setTabs((prev) => {
       const currentId = getCurrentActiveId();
       const insertAfter = prev.findIndex((t) => t.id === currentId);
       const nextTabs = [...prev];
-      const newTab: Tab = { id, title: meta.title || 'Документ', closable: true, type: 'doc', data: { meta, contentHtml: data.contentHtml || '<p></p>' }, filePath: filePath || null };
+      const newTab: Tab = { id, title: meta.title || 'Документ', closable: true, type: 'doc', mode: 'edit', data: { meta, contentHtml: data.contentHtml || '<p></p>', author: data.author }, filePath: filePath || null };
       const insertIndex = Math.min(Math.max(insertAfter + 1, 0), nextTabs.length);
       nextTabs.splice(insertIndex, 0, newTab);
       return nextTabs;
     });
     setActiveTabSafely(id);
+    // Set original content for tracking changes
+    setOriginalContentForTab(id, data.contentHtml || '<p></p>');
   }
 
   // Drag and drop reordering of tabs
@@ -1186,6 +1646,226 @@ export const App: React.FC = () => {
     window.api.endExternalDrag();
   }
 
+  // Context menu handler
+  function handleTabContextMenu(e: React.MouseEvent<HTMLDivElement>, tabId: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Only show context menu for document tabs, not home or create tabs
+    const tab = tabs.find(t => t.id === tabId);
+    if (!tab || tab.type === 'home' || tab.type === 'create') return;
+    
+    // Calculate position to ensure menu stays within viewport
+    const menuWidth = 120; // min-width from CSS
+    const menuHeight = 4 * 40; // approximate height for 4 items
+    const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10);
+    const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10);
+    
+    setContextMenu({
+      visible: true,
+      x: x,
+      y: y,
+      tabId: tabId
+    });
+  }
+
+  // Context menu action handlers
+  function handleContextMenuAction(action: string, tabId: string) {
+    setContextMenu(null);
+    
+    switch (action) {
+      case 'description':
+        switchTabMode(tabId, 'description');
+        break;
+      case 'conduct':
+        switchTabMode(tabId, 'edit');
+        break;
+      case 'analysis':
+        switchTabMode(tabId, 'analysis');
+        break;
+      case 'view':
+        switchTabMode(tabId, 'view');
+        break;
+    }
+  }
+
+  // Switch tab mode
+  function switchTabMode(tabId: string, mode: 'edit' | 'description' | 'analysis' | 'view') {
+    const tab = tabs.find(t => t.id === tabId);
+    
+    if (mode === 'description' && tab?.type === 'doc') {
+      // When entering description mode, save current state as temporary state
+      const currentMeta = tab.data?.meta as DocMeta;
+      setTempDescriptionMeta(prev => new Map(prev).set(tabId, { ...currentMeta }));
+    } else if (mode === 'analysis' && tab?.type === 'doc') {
+      // When entering analysis mode, initialize analysis data
+      const currentMeta = tab.data?.meta as DocMeta;
+      const existingAnalysis = currentMeta.analysis;
+      
+      // Parse text fields into analysis items
+      const parseTextToItems = (text: string): AnalysisItem[] => {
+        if (!text.trim()) return [];
+        return text.split('\n').filter(line => line.trim()).map(line => ({
+          text: line.trim(),
+          completed: false
+        }));
+      };
+
+      // Helper function to merge existing completion states with new text
+      const mergeAnalysisItems = (newText: string, existingItems: AnalysisItem[] = []): AnalysisItem[] => {
+        const newItems = parseTextToItems(newText);
+        
+        // Create a map of existing completion states by text
+        const completionMap = new Map<string, boolean>();
+        existingItems.forEach(item => {
+          completionMap.set(item.text, item.completed);
+        });
+        
+        // Apply existing completion states to new items
+        return newItems.map(newItem => ({
+          text: newItem.text,
+          completed: completionMap.get(newItem.text) || false
+        }));
+      };
+
+      // Use current docMeta state (which has the latest edits) instead of stored meta
+      const analysisData: AnalysisData = {
+        conclusions: existingAnalysis?.conclusions || '',
+        goals: mergeAnalysisItems(docMeta.goals, existingAnalysis?.goals),
+        hypotheses: mergeAnalysisItems(docMeta.hypotheses, existingAnalysis?.hypotheses),
+        plan: mergeAnalysisItems(docMeta.plan, existingAnalysis?.plan)
+      };
+      
+      setTempAnalysisData(prev => new Map(prev).set(tabId, analysisData));
+    } else if (mode === 'view' && tab?.type === 'doc') {
+      // When entering view mode, initialize temp states with the tab's current meta data
+      // Only set if not already exists for this tab to preserve any existing temporary state
+      if (!tempDescriptionMeta.has(tabId)) {
+        const currentMeta = tab.data?.meta as DocMeta;
+        // Use the current docMeta if this is the active tab (includes unsaved changes)
+        // Otherwise use the stored tab meta
+        const metaToUse = tabId === activeTabId ? docMeta : currentMeta;
+        setTempDescriptionMeta(prev => new Map(prev).set(tabId, { ...metaToUse }));
+      }
+      
+      // Initialize analysis data for view mode only if not already exists
+      if (!tempAnalysisData.has(tabId)) {
+        const currentMeta = tab.data?.meta as DocMeta;
+        const existingAnalysis = currentMeta.analysis;
+        const parseTextToItems = (text: string): AnalysisItem[] => {
+          if (!text.trim()) return [];
+          return text.split('\n').filter(line => line.trim()).map(line => ({
+            text: line.trim(),
+            completed: false
+          }));
+        };
+
+        const mergeAnalysisItems = (newText: string, existingItems: AnalysisItem[] = []): AnalysisItem[] => {
+          const newItems = parseTextToItems(newText);
+          const completionMap = new Map<string, boolean>();
+          existingItems.forEach(item => {
+            completionMap.set(item.text, item.completed);
+          });
+          return newItems.map(newItem => ({
+            text: newItem.text,
+            completed: completionMap.get(newItem.text) || false
+          }));
+        };
+
+        // Use the current docMeta if this is the active tab, otherwise use stored meta
+        const metaForAnalysis = tabId === activeTabId ? docMeta : currentMeta;
+        const analysisData: AnalysisData = {
+          conclusions: existingAnalysis?.conclusions || '',
+          goals: mergeAnalysisItems(metaForAnalysis.goals, existingAnalysis?.goals),
+          hypotheses: mergeAnalysisItems(metaForAnalysis.hypotheses, existingAnalysis?.hypotheses),
+          plan: mergeAnalysisItems(metaForAnalysis.plan, existingAnalysis?.plan)
+        };
+        
+        setTempAnalysisData(prev => new Map(prev).set(tabId, analysisData));
+      }
+    } else if (mode === 'edit') {
+      // When leaving any mode, clear temporary states for this tab
+      setTempDescriptionMeta(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(tabId);
+        return newMap;
+      });
+      setTempAnalysisData(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(tabId);
+        return newMap;
+      });
+    }
+    
+    setTabs((prev) => prev.map((tab) => 
+      tab.id === tabId ? { ...tab, mode } : tab
+    ));
+  }
+
+  // Save description and switch to edit mode
+  function saveDescriptionAndSwitchToEdit() {
+    if (activeTab?.type === 'doc') {
+      const tempMeta = tempDescriptionMeta.get(activeTab.id);
+      if (tempMeta) {
+        // Save the temporary state to the actual tab data
+        setTabs((prev) => prev.map((tab) => 
+          tab.id === activeTab.id 
+            ? { 
+                ...tab, 
+                title: tempMeta.title || tab.title,
+                data: { ...tab.data, meta: { ...tempMeta } }
+              }
+            : tab
+        ));
+        switchTabMode(activeTab.id, 'edit');
+      }
+    }
+  }
+
+  // Cancel description edit and switch back to edit mode
+  function cancelDescriptionEdit() {
+    if (activeTab?.type === 'doc') {
+      // Restore original meta from the tab data
+      const originalMeta = activeTab.data?.meta as DocMeta;
+      if (originalMeta) {
+        setDocMeta({ ...originalMeta });
+      }
+      switchTabMode(activeTab.id, 'edit');
+    }
+  }
+
+  // Save analysis and switch to edit mode
+  function saveAnalysisAndSwitchToEdit() {
+    if (activeTab?.type === 'doc') {
+      const tempAnalysis = tempAnalysisData.get(activeTab.id);
+      if (tempAnalysis) {
+        // Save the analysis data to the actual tab data
+        setTabs((prev) => prev.map((tab) => 
+          tab.id === activeTab.id 
+            ? { 
+                ...tab, 
+                data: { 
+                  ...tab.data, 
+                  meta: { 
+                    ...tab.data.meta, 
+                    analysis: { ...tempAnalysis } 
+                  } 
+                }
+              }
+            : tab
+        ));
+        switchTabMode(activeTab.id, 'edit');
+      }
+    }
+  }
+
+  // Cancel analysis edit and switch back to edit mode
+  function cancelAnalysisEdit() {
+    if (activeTab?.type === 'doc') {
+      switchTabMode(activeTab.id, 'edit');
+    }
+  }
+
   // detach by double-click only
 
   // No global drag-to-detach. Detach is via double-click.
@@ -1193,21 +1873,103 @@ export const App: React.FC = () => {
   async function save(asXml = false) {
     if (activeTab?.type !== 'doc') return;
     const currentTab = tabs.find((t) => t.id === activeTab.id);
+    const currentMeta = currentTab?.data?.meta as DocMeta;
+    
+    // Always use current docMeta state (which reflects current edits) combined with stored analysis data
     const jsonData = {
       title: docMeta.title,
       description: docMeta.description,
       goals: docMeta.goals,
       hypotheses: docMeta.hypotheses,
       plan: docMeta.plan,
+      analysis: currentMeta?.analysis,
       contentHtml: editor?.getHTML() || '',
+      author: {
+        id: user.id,
+        username: user.username,
+        fullName: user.fullName,
+        groupId: user.groupId,
+        savedAt: new Date().toISOString()
+      },
       version: 1,
     };
+    // Update tab's meta data with current state before saving
+    if (currentTab) {
+      setTabs((prev) => prev.map((tab) => 
+        tab.id === currentTab.id 
+          ? { 
+              ...tab, 
+              data: { 
+                ...tab.data, 
+                meta: { 
+                  ...tab.data.meta, 
+                  title: docMeta.title,
+                  description: docMeta.description,
+                  goals: docMeta.goals,
+                  hypotheses: docMeta.hypotheses,
+                  plan: docMeta.plan
+                } 
+              }
+            }
+          : tab
+      ));
+    }
+
     if (currentTab?.filePath) {
+      console.log('[Save] Saving document to existing path:', currentTab.filePath);
       const res = await window.api.saveDocumentToPath({ filePath: currentTab.filePath, jsonData, asXml: false });
+      console.log('[Save] File save result:', res);
       if (!res?.canceled) {
+        console.log('[Save] File save successful, proceeding with metadata save...');
         setTabs((prev) => prev.map((t) => t.id === currentTab.id ? { ...t, filePath: res.filePath } : t));
+        
+        // Save document metadata to database
+        try {
+          console.log('[Save] Starting document metadata save process...');
+          console.log('[Save] User data:', user);
+          console.log('[Save] Document data:', {
+            title: docMeta.title,
+            description: docMeta.description,
+            goals: docMeta.goals,
+            hypotheses: docMeta.hypotheses,
+            plan: docMeta.plan
+          });
+          
+          // Generate document cover
+          console.log('[Save] Generating document cover...');
+          const coverResult = await window.api.generateDocumentCover({
+            htmlContent: editor?.getHTML() || '',
+            filePath: currentTab.filePath
+          });
+          console.log('[Save] Cover generation result:', coverResult);
+          
+          const coverPath = coverResult.success ? coverResult.coverPath : null;
+          
+          // Save to database
+          console.log('[Save] Saving to database...');
+          const saveResult = await window.api.saveDocumentMetadata({
+            documentData: {
+              title: docMeta.title,
+              description: docMeta.description,
+              goals: docMeta.goals,
+              hypotheses: docMeta.hypotheses,
+              plan: docMeta.plan
+            },
+            authorData: user,
+            filePath: currentTab.filePath,
+            coverImagePath: coverPath
+          });
+          console.log('[Save] Database save result:', saveResult);
+          
+          console.log('Document metadata saved to database successfully');
+        } catch (error) {
+          console.error('Failed to save document metadata:', error);
+        }
+      } else {
+        console.log('[Save] File save was canceled or failed:', res);
       }
     } else {
+      console.log('[Save] No existing file path, calling saveAs...');
       await saveAs();
     }
   }
@@ -1220,84 +1982,393 @@ export const App: React.FC = () => {
       const currentTab = tabsRef.current.find((t) => t.id === a.id);
       const e = editorRef.current;
       const meta = docMetaRef.current;
+      const currentMeta = currentTab?.data?.meta as DocMeta;
       const jsonData = {
         title: meta.title,
         description: meta.description,
         goals: meta.goals,
         hypotheses: meta.hypotheses,
         plan: meta.plan,
+        analysis: currentMeta?.analysis,
         contentHtml: e?.getHTML() || '',
+        author: {
+          id: user.id,
+          username: user.username,
+          fullName: user.fullName,
+          groupId: user.groupId,
+          savedAt: new Date().toISOString()
+        },
         version: 1,
       };
+
+      // Update tab's meta data with current state before saving
+      setTabs((prev) => prev.map((tab) => 
+        tab.id === currentTab?.id 
+          ? { 
+              ...tab, 
+              data: { 
+                ...tab.data, 
+                meta: { 
+                  ...tab.data.meta, 
+                  title: meta.title,
+                  description: meta.description,
+                  goals: meta.goals,
+                  hypotheses: meta.hypotheses,
+                  plan: meta.plan
+                } 
+              }
+            }
+          : tab
+      ));
+
       if (currentTab?.filePath) {
+        console.log('[SaveRef] Saving document to existing path:', currentTab.filePath);
         const res = await window.api.saveDocumentToPath({ filePath: currentTab.filePath, jsonData, asXml: false });
+        console.log('[SaveRef] File save result:', res);
         if (!res?.canceled) {
+          console.log('[SaveRef] File save successful, proceeding with metadata save...');
           setTabs((prev) => prev.map((t) => t.id === currentTab.id ? { ...t, filePath: res.filePath } : t));
+          
+          // Save document metadata to database
+          try {
+            console.log('[SaveRef] Starting document metadata save process...');
+            console.log('[SaveRef] User data:', user);
+            console.log('[SaveRef] Document data:', {
+              title: meta.title,
+              description: meta.description,
+              goals: meta.goals,
+              hypotheses: meta.hypotheses,
+              plan: meta.plan
+            });
+            
+            // Generate document cover (get old cover path first)
+            console.log('[SaveRef] Getting existing document info for cover replacement...');
+            let oldCoverPath = null;
+            try {
+              const existingDoc = await window.api.getDocumentByPath({ filePath: currentTab.filePath });
+              if (existingDoc.success && existingDoc.document) {
+                oldCoverPath = existingDoc.document.cover_image_path;
+                console.log('[SaveRef] Found existing cover to replace:', oldCoverPath);
+              }
+            } catch (error) {
+              console.log('[SaveRef] No existing document found, creating new cover');
+            }
+            
+            console.log('[SaveRef] Generating document cover...');
+            const coverResult = await window.api.generateDocumentCover({
+              htmlContent: e?.getHTML() || '',
+              filePath: currentTab.filePath,
+              oldCoverPath: oldCoverPath
+            });
+            console.log('[SaveRef] Cover generation result:', coverResult);
+            
+            const coverPath = coverResult.success ? coverResult.coverPath : null;
+            
+            // Save to database
+            console.log('[SaveRef] Saving to database...');
+            const saveResult = await window.api.saveDocumentMetadata({
+              documentData: {
+                title: meta.title,
+                description: meta.description,
+                goals: meta.goals,
+                hypotheses: meta.hypotheses,
+                plan: meta.plan
+              },
+              authorData: user,
+              filePath: currentTab.filePath,
+              coverImagePath: coverPath
+            });
+            console.log('[SaveRef] Database save result:', saveResult);
+            
+            console.log('Document metadata saved to database successfully');
+          } catch (error) {
+            console.error('Failed to save document metadata:', error);
+          }
+        } else {
+          console.log('[SaveRef] File save was canceled or failed:', res);
         }
       } else {
+        console.log('[SaveRef] No existing file path, calling saveAsRef...');
         await saveAsRef.current();
       }
     };
     saveAsRef.current = async () => {
       const a = activeTabRef.current;
       if (!a || a.type !== 'doc') return;
+      const currentTab = tabsRef.current.find((t) => t.id === a.id);
       const e = editorRef.current;
       const meta = docMetaRef.current;
+      const currentMeta = currentTab?.data?.meta as DocMeta;
       const jsonData = {
         title: meta.title,
         description: meta.description,
         goals: meta.goals,
         hypotheses: meta.hypotheses,
         plan: meta.plan,
+        analysis: currentMeta?.analysis,
         contentHtml: e?.getHTML() || '',
+        author: {
+          id: user.id,
+          username: user.username,
+          fullName: user.fullName,
+          groupId: user.groupId,
+          savedAt: new Date().toISOString()
+        },
         version: 1,
       };
-      const res = await window.api.saveDocumentAs({ jsonData, asXml: false });
+
+      // Update tab's meta data with current state before saving
+      setTabs((prev) => prev.map((tab) => 
+        tab.id === currentTab?.id 
+          ? { 
+              ...tab, 
+              data: { 
+                ...tab.data, 
+                meta: { 
+                  ...tab.data.meta, 
+                  title: meta.title,
+                  description: meta.description,
+                  goals: meta.goals,
+                  hypotheses: meta.hypotheses,
+                  plan: meta.plan
+                } 
+              }
+            }
+          : tab
+      ));
+
+      console.log('[SaveAsRef] Calling saveDocumentAs with jsonData...');
+      const defaultFilename = meta.title ? `${meta.title}.rsrch` : 'document.rsrch';
+      const res = await window.api.saveDocumentAs({ defaultPath: defaultFilename, jsonData, asXml: false });
+      console.log('[SaveAsRef] File save result:', res);
       if (!res?.canceled) {
+        console.log('[SaveAsRef] File save successful, proceeding with metadata save...');
         const fp = res.filePath as string;
         setTabs((prev) => prev.map((t) => t.id === a.id ? { ...t, filePath: fp, title: meta.title || t.title } : t));
+        
+        // Save document metadata to database
+        try {
+          console.log('[SaveAsRef] Starting document metadata save process...');
+          console.log('[SaveAsRef] User data:', user);
+          console.log('[SaveAsRef] Document data:', {
+            title: meta.title,
+            description: meta.description,
+            goals: meta.goals,
+            hypotheses: meta.hypotheses,
+            plan: meta.plan
+          });
+          
+          // Generate document cover
+          console.log('[SaveAsRef] Generating document cover...');
+          const coverResult = await window.api.generateDocumentCover({
+            htmlContent: e?.getHTML() || '',
+            filePath: fp
+          });
+          console.log('[SaveAsRef] Cover generation result:', coverResult);
+          
+          const coverPath = coverResult.success ? coverResult.coverPath : null;
+          
+          // Save to database
+          console.log('[SaveAsRef] Saving to database...');
+          const saveResult = await window.api.saveDocumentMetadata({
+            documentData: {
+              title: meta.title,
+              description: meta.description,
+              goals: meta.goals,
+              hypotheses: meta.hypotheses,
+              plan: meta.plan
+            },
+            authorData: user,
+            filePath: fp,
+            coverImagePath: coverPath
+          });
+          console.log('[SaveAsRef] Database save result:', saveResult);
+          
+          console.log('Document metadata saved to database successfully');
+        } catch (error) {
+          console.error('Failed to save document metadata:', error);
+        }
+      } else {
+        console.log('[SaveAsRef] File save was canceled or failed:', res);
       }
     };
   }, [tabs, activeTabId, editor, docMeta]);
 
   async function saveAs() {
     if (activeTab?.type !== 'doc') return;
+    const currentTab = tabs.find((t) => t.id === activeTab.id);
+    const currentMeta = currentTab?.data?.meta as DocMeta;
     const jsonData = {
       title: docMeta.title,
       description: docMeta.description,
       goals: docMeta.goals,
       hypotheses: docMeta.hypotheses,
       plan: docMeta.plan,
+      analysis: currentMeta?.analysis,
       contentHtml: editor?.getHTML() || '',
+      author: {
+        id: user.id,
+        username: user.username,
+        fullName: user.fullName,
+        groupId: user.groupId,
+        savedAt: new Date().toISOString()
+      },
       version: 1,
     };
-    const res = await window.api.saveDocumentAs({ jsonData, asXml: false });
+
+    // Update tab's meta data with current state before saving
+    if (currentTab) {
+      setTabs((prev) => prev.map((tab) => 
+        tab.id === currentTab.id 
+          ? { 
+              ...tab, 
+              data: { 
+                ...tab.data, 
+                meta: { 
+                  ...tab.data.meta, 
+                  title: docMeta.title,
+                  description: docMeta.description,
+                  goals: docMeta.goals,
+                  hypotheses: docMeta.hypotheses,
+                  plan: docMeta.plan
+                } 
+              }
+            }
+          : tab
+      ));
+    }
+
+    console.log('[SaveAs] Calling saveDocumentAs with jsonData...');
+    const defaultFilename = docMeta.title ? `${docMeta.title}.rsrch` : 'document.rsrch';
+    const res = await window.api.saveDocumentAs({ defaultPath: defaultFilename, jsonData, asXml: false });
+    console.log('[SaveAs] File save result:', res);
     if (!res?.canceled) {
+      console.log('[SaveAs] File save successful, proceeding with metadata save...');
       const fp = res.filePath as string;
       setTabs((prev) => prev.map((t) => t.id === activeTab.id ? { ...t, filePath: fp, title: docMeta.title || t.title } : t));
+      
+      // Save document metadata to database
+      try {
+        console.log('[SaveAs] Starting document metadata save process...');
+        console.log('[SaveAs] User data:', user);
+        console.log('[SaveAs] Document data:', {
+          title: docMeta.title,
+          description: docMeta.description,
+          goals: docMeta.goals,
+          hypotheses: docMeta.hypotheses,
+          plan: docMeta.plan
+        });
+        
+        // Generate document cover
+        console.log('[SaveAs] Generating document cover...');
+        const coverResult = await window.api.generateDocumentCover({
+          htmlContent: editor?.getHTML() || '',
+          filePath: fp
+        });
+        console.log('[SaveAs] Cover generation result:', coverResult);
+        
+        const coverPath = coverResult.success ? coverResult.coverPath : null;
+        
+        // Save to database
+        console.log('[SaveAs] Saving to database...');
+        const saveResult = await window.api.saveDocumentMetadata({
+          documentData: {
+            title: docMeta.title,
+            description: docMeta.description,
+            goals: docMeta.goals,
+            hypotheses: docMeta.hypotheses,
+            plan: docMeta.plan
+          },
+          authorData: user,
+          filePath: fp,
+          coverImagePath: coverPath
+        });
+        console.log('[SaveAs] Database save result:', saveResult);
+        
+        console.log('Document metadata saved to database successfully');
+      } catch (error) {
+        console.error('Failed to save document metadata:', error);
+      }
+    } else {
+      console.log('[SaveAs] File save was canceled or failed:', res);
     }
   }
 
-  // Sync editor and meta when switching tabs
+  // Track previous tab to save content before switching
+  const previousActiveTabIdRef = useRef<string>(activeTabId);
+  
+  // Save current tab content when switching away
+  useEffect(() => {
+    const previousTabId = previousActiveTabIdRef.current;
+    if (previousTabId !== activeTabId && editor) {
+      const previousTab = tabs.find((x) => x.id === previousTabId);
+      if (previousTab && previousTab.type === 'doc') {
+        const currentHtml = editor.getHTML();
+        setTabs((prev) => prev.map((tab) => 
+          tab.id === previousTabId 
+            ? { ...tab, data: { ...tab.data, contentHtml: currentHtml } }
+            : tab
+        ));
+      }
+    }
+    previousActiveTabIdRef.current = activeTabId;
+  }, [activeTabId, editor, tabs]);
+
+  // Load content when switching to a tab
   useEffect(() => {
     const t = tabs.find((x) => x.id === activeTabId);
     if (!t) return;
+    
     if (t.type === 'doc') {
       const meta = t.data?.meta as DocMeta;
       const html = t.data?.contentHtml as string;
-      setDocMeta({ ...meta });
+      
+      // If we're in description mode and have temporary state for this tab, use that instead
+      if (t.mode === 'description') {
+        const tempMeta = tempDescriptionMeta.get(t.id);
+        if (tempMeta) {
+          setDocMeta({ ...tempMeta });
+        } else {
+          setDocMeta({ ...meta });
+        }
+      } else {
+        setDocMeta({ ...meta });
+      }
+      
       if (editor && typeof html === 'string') {
         editor.commands.setContent(html || '<p></p>');
       }
+    } else if (t.type === 'create') {
+      // Reset meta for create tab only, don't affect other tabs
+      setDocMeta({ title: '', description: '', goals: '', hypotheses: '', plan: '' });
+      if (editor) {
+        editor.commands.setContent('<p></p>');
+      }
     }
-  }, [activeTabId]);
+  }, [activeTabId, editor, tempDescriptionMeta]);
 
   // Update active tab's meta when inputs change
   function updateMeta<K extends keyof DocMeta>(key: K, value: DocMeta[K]) {
     setDocMeta((prev) => ({ ...prev, [key]: value }));
     const t = tabs.find((x) => x.id === activeTabId);
-    if (t && t.type === 'doc') {
-      setTabs((prev) => prev.map((tab) => tab.id === t.id ? { ...tab, title: key === 'title' ? (value as string) || tab.title : tab.title, data: { ...tab.data, meta: { ...tab.data.meta, [key]: value } } } : tab));
+    
+    if (t && (t.type === 'doc' || t.type === 'create')) {
+      if (t.type === 'doc') {
+        // If we're in description mode, only update temporary state, not the actual tab data
+        if (t.mode === 'description') {
+          setTempDescriptionMeta((prev) => {
+            const currentTemp = prev.get(t.id);
+            if (currentTemp) {
+              return new Map(prev).set(t.id, { ...currentTemp, [key]: value });
+            }
+            return prev;
+          });
+        } else {
+          // For edit mode, update the stored meta data immediately
+          setTabs((prev) => prev.map((tab) => tab.id === t.id ? { ...tab, title: key === 'title' ? (value as string) || tab.title : tab.title, data: { ...tab.data, meta: { ...tab.data.meta, [key]: value } } } : tab));
+        }
+      }
+      // For create tabs, we only update the local docMeta state (no persistent storage needed)
     }
   }
 
@@ -1315,7 +2386,7 @@ export const App: React.FC = () => {
         {tabs.map((t) => (
           <div
             key={t.id}
-            className={`tab ${activeTabId === t.id ? 'active' : ''} ${t.type !== 'home' ? 'draggable' : ''} ${draggingTabId === t.id ? 'dragging' : ''} ${dropTargetId === t.id ? (dropBefore ? 'drop-before' : 'drop-after') : ''}`}
+            className={`tab ${activeTabId === t.id ? 'active' : ''} ${t.type !== 'home' ? 'draggable' : ''} ${t.type === 'home' ? 'home-tab' : ''} ${draggingTabId === t.id ? 'dragging' : ''} ${dropTargetId === t.id ? (dropBefore ? 'drop-before' : 'drop-after') : ''}`}
               onClick={() => setActiveTabSafely(t.id)}
               onDoubleClick={() => {
                 // Detach on double-click
@@ -1332,11 +2403,12 @@ export const App: React.FC = () => {
             onDragStart={(e) => onDragStartTab(e, t.id)}
             onDragOver={(e) => onDragOverTab(e, t.id)}
             onDrop={(e) => onDropOnTab(e, t.id)}
-              onDragEnd={(e) => onDragEndTab(e)}
+            onDragEnd={(e) => onDragEndTab(e)}
+            onContextMenu={(e) => handleTabContextMenu(e, t.id)}
           >
             <span className="title">{t.type === 'home' ? <RiMenuLine /> : t.title}</span>
               {t.closable && (
-                <button className="close" aria-label="Close tab" title="Close" onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}>
+                <button className="close" aria-label="Close tab" title="Close" onClick={async (e) => { e.stopPropagation(); await closeTab(t.id); }}>
                   ✕
                 </button>
               )}
@@ -1356,16 +2428,102 @@ export const App: React.FC = () => {
             style={{ width: 1, height: 1 }}
           />
       </div>
+      
+      {/* Context Menu */}
+      {contextMenu?.visible && (
+        <div 
+          className="tab-context-menu"
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            zIndex: 1000
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {(() => {
+            const currentTab = tabs.find(t => t.id === contextMenu.tabId);
+            const currentMode = currentTab?.mode || 'edit';
+            
+            return (
+              <>
+                <button 
+                  className={`context-menu-item ${currentMode === 'description' ? 'active' : ''}`}
+                  onClick={() => handleContextMenuAction('description', contextMenu.tabId)}
+                >
+                  Описание {currentMode === 'description' ? '✓' : ''}
+                </button>
+                <button 
+                  className={`context-menu-item ${currentMode === 'edit' ? 'active' : ''}`}
+                  onClick={() => handleContextMenuAction('conduct', contextMenu.tabId)}
+                >
+                  Проведение {currentMode === 'edit' ? '✓' : ''}
+                </button>
+                <button 
+                  className={`context-menu-item ${currentMode === 'analysis' ? 'active' : ''}`}
+                  onClick={() => handleContextMenuAction('analysis', contextMenu.tabId)}
+                >
+                  Анализ {currentMode === 'analysis' ? '✓' : ''}
+                </button>
+                <button 
+                  className={`context-menu-item ${currentMode === 'view' ? 'active' : ''}`}
+                  onClick={() => handleContextMenuAction('view', contextMenu.tabId)}
+                >
+                  Просмотр {currentMode === 'view' ? '✓' : ''}
+                </button>
+              </>
+            );
+          })()}
+        </div>
+      )}
+      
       {hasSidebar && (
         <div className="sidebar">
-          <button onClick={() => setSidebarView('users')}>Пользователи</button>
-          <button onClick={() => setSidebarView('research')}>Исследования</button>
-          <button onClick={() => setSidebarView('recent')}>Недавнее</button>
+          <div className="sidebar-header">
+            <div className="user-profile">
+              <button 
+                className="profile-btn"
+                onClick={() => setShowProfileModal(true)}
+                title="Мой профиль"
+              >
+                <span className="profile-icon">👤</span>
+                <span className="profile-name">{user.fullName}</span>
+              </button>
+            </div>
+          </div>
+          
+          <div className="sidebar-nav">
+            <button 
+              className={`nav-btn ${sidebarView === 'recent' ? 'active' : ''}`}
+              onClick={() => setSidebarView('recent')}
+            >
+              <span className="nav-icon">🕐</span>
+              <span className="nav-text">Недавнее</span>
+            </button>
+            <button 
+              className={`nav-btn ${sidebarView === 'research' ? 'active' : ''}`}
+              onClick={() => setSidebarView('research')}
+            >
+              <span className="nav-icon">📄</span>
+              <span className="nav-text">Исследования</span>
+            </button>
+            <button 
+              className={`nav-btn ${sidebarView === 'users' ? 'active' : ''}`}
+              onClick={() => setSidebarView('users')}
+            >
+              <span className="nav-icon">👥</span>
+              <span className="nav-text">Пользователи</span>
+            </button>
+          </div>
         </div>
       )}
       <div className="content">
-        <div className="view" ref={viewRef}>
-          {activeTab?.type === 'home' && (
+        <div className={`view ${
+          activeTab?.type === 'doc' && activeTab?.mode === 'edit' 
+            ? 'conduct-mode' 
+            : 'padded-mode'
+        }`} ref={viewRef}>
+          {activeTab?.type === 'home' && sidebarView !== 'research' && sidebarView !== 'users' && sidebarView !== 'recent' && (
             <div>
               <h2>Добро пожаловать в Researcher</h2>
               <p className="section-title">Навигация</p>
@@ -1376,26 +2534,224 @@ export const App: React.FC = () => {
             </div>
           )}
 
+          {/* Research content shown when sidebar view is 'research' */}
+          {sidebarView === 'research' && activeTab?.type === 'home' && (
+            <DocumentLibrary 
+              user={user} 
+              onOpenDocument={async (filePath) => {
+                try {
+                  console.log('[DocumentLibrary] Opening document:', filePath);
+                  const result = await window.api.openDocumentPath(filePath);
+                  console.log('[DocumentLibrary] Open document result:', result);
+                  if (!result.canceled && result.data) {
+                    console.log('[DocumentLibrary] Loading document data into new tab...');
+                    openLoadedDoc(result.data, result.filePath);
+                    addToRecentDocuments(filePath);
+                  } else {
+                    console.error('[DocumentLibrary] Failed to open document - no data or canceled');
+                  }
+                } catch (error) {
+                  console.error('Failed to open document:', error);
+                }
+              }}
+            />
+          )}
+
+          {/* Users content shown when sidebar view is 'users' */}
+          {sidebarView === 'users' && activeTab?.type === 'home' && (
+            <UsersList user={user} />
+          )}
+
+          {/* Recent documents content shown when sidebar view is 'recent' */}
+          {sidebarView === 'recent' && activeTab?.type === 'home' && (
+            <RecentDocuments 
+              user={user} 
+              recentDocuments={recentDocuments}
+              onOpenDocument={async (filePath) => {
+                try {
+                  console.log('[RecentDocuments] Opening document:', filePath);
+                  const result = await window.api.openDocumentPath(filePath);
+                  console.log('[RecentDocuments] Open document result:', result);
+                  if (!result.canceled && result.data) {
+                    console.log('[RecentDocuments] Loading document data into new tab...');
+                    openLoadedDoc(result.data, result.filePath);
+                    addToRecentDocuments(filePath);
+                  } else {
+                    console.error('[RecentDocuments] Failed to open document - no data or canceled');
+                  }
+                } catch (error) {
+                  console.error('Failed to open document:', error);
+                }
+              }}
+            />
+          )}
+
           {activeTab?.type === 'create' && (
             <div className="doc-form">
+              <h2>Создание нового исследования</h2>
               <label>Название</label>
               <input value={docMeta.title} onChange={(e) => updateMeta('title', e.target.value)} />
-              <label>Описание</label>
-              <textarea rows={3} value={docMeta.description} onChange={(e) => updateMeta('description', e.target.value)} />
               <label>Цели</label>
-              <textarea rows={3} value={docMeta.goals} onChange={(e) => updateMeta('goals', e.target.value)} />
+              <textarea value={docMeta.goals} onChange={(e) => updateMeta('goals', e.target.value)} />
               <label>Гипотезы</label>
-              <textarea rows={3} value={docMeta.hypotheses} onChange={(e) => updateMeta('hypotheses', e.target.value)} />
+              <textarea value={docMeta.hypotheses} onChange={(e) => updateMeta('hypotheses', e.target.value)} />
               <label>Плановый ход работы</label>
-              <textarea rows={3} value={docMeta.plan} onChange={(e) => updateMeta('plan', e.target.value)} />
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={createDocument}>Создать</button>
-                <button onClick={() => closeTab(activeTabId)}>Отмена</button>
+              <textarea value={docMeta.plan} onChange={(e) => updateMeta('plan', e.target.value)} />
+              <div className="button-group">
+                <button className="primary" onClick={createDocument}>Создать</button>
+                <button className="secondary" onClick={() => closeTab(activeTabId)}>Отмена</button>
               </div>
             </div>
           )}
 
-          {activeTab?.type === 'doc' && (
+          {activeTab?.type === 'doc' && activeTab?.mode === 'description' && (
+            <div className="doc-form">
+              <h2>Описание документа</h2>
+              <label>Название</label>
+              <input value={docMeta.title} onChange={(e) => updateMeta('title', e.target.value)} />
+              <label>Цели</label>
+              <textarea value={docMeta.goals} onChange={(e) => updateMeta('goals', e.target.value)} />
+              <label>Гипотезы</label>
+              <textarea value={docMeta.hypotheses} onChange={(e) => updateMeta('hypotheses', e.target.value)} />
+              <label>Плановый ход работы</label>
+              <textarea value={docMeta.plan} onChange={(e) => updateMeta('plan', e.target.value)} />
+              <div className="button-group">
+                <button className="primary" onClick={() => saveDescriptionAndSwitchToEdit()}>Сохранить</button>
+                <button className="secondary" onClick={() => cancelDescriptionEdit()}>Отмена</button>
+              </div>
+            </div>
+          )}
+
+          {activeTab?.type === 'doc' && activeTab?.mode === 'analysis' && (
+            <div className="doc-form">
+              <h2>Анализ исследования</h2>
+              
+              <label>Выводы</label>
+              <textarea 
+                value={tempAnalysisData.get(activeTab.id)?.conclusions || ''} 
+                onChange={(e) => setTempAnalysisData(prev => {
+                  const current = prev.get(activeTab.id);
+                  if (current) {
+                    return new Map(prev).set(activeTab.id, { ...current, conclusions: e.target.value });
+                  }
+                  return prev;
+                })}
+                placeholder="Введите ваши выводы по результатам исследования..."
+              />
+
+              {/* Goals Section */}
+              <div className="analysis-section">
+                <h3>Цели</h3>
+                {tempAnalysisData.get(activeTab.id)?.goals && tempAnalysisData.get(activeTab.id)!.goals.length > 0 ? (
+                  tempAnalysisData.get(activeTab.id)!.goals.map((item, index) => (
+                    <div key={index} className="analysis-item">
+                      <label className="checkbox-label">
+                        <input 
+                          type="checkbox" 
+                          checked={item.completed}
+                          onChange={(e) => setTempAnalysisData(prev => {
+                            const current = prev.get(activeTab.id);
+                            if (current) {
+                              return new Map(prev).set(activeTab.id, {
+                                ...current,
+                                goals: current.goals.map((goal, i) => 
+                                  i === index ? { ...goal, completed: e.target.checked } : goal
+                                )
+                              });
+                            }
+                            return prev;
+                          })}
+                        />
+                        <span>{item.text}</span>
+                      </label>
+                    </div>
+                  ))
+                ) : (
+                  <p className="empty-placeholder">Цели не указаны в описании документа</p>
+                )}
+              </div>
+
+              {/* Hypotheses Section */}
+              <div className="analysis-section">
+                <h3>Гипотезы</h3>
+                {tempAnalysisData.get(activeTab.id)?.hypotheses && tempAnalysisData.get(activeTab.id)!.hypotheses.length > 0 ? (
+                  tempAnalysisData.get(activeTab.id)!.hypotheses.map((item, index) => (
+                    <div key={index} className="analysis-item">
+                      <label className="checkbox-label">
+                        <input 
+                          type="checkbox" 
+                          checked={item.completed}
+                          onChange={(e) => setTempAnalysisData(prev => {
+                            const current = prev.get(activeTab.id);
+                            if (current) {
+                              return new Map(prev).set(activeTab.id, {
+                                ...current,
+                                hypotheses: current.hypotheses.map((hypothesis, i) => 
+                                  i === index ? { ...hypothesis, completed: e.target.checked } : hypothesis
+                                )
+                              });
+                            }
+                            return prev;
+                          })}
+                        />
+                        <span>{item.text}</span>
+                      </label>
+                    </div>
+                  ))
+                ) : (
+                  <p className="empty-placeholder">Гипотезы не указаны в описании документа</p>
+                )}
+              </div>
+
+              {/* Plan Section */}
+              <div className="analysis-section">
+                <h3>Плановый ход работы</h3>
+                {tempAnalysisData.get(activeTab.id)?.plan && tempAnalysisData.get(activeTab.id)!.plan.length > 0 ? (
+                  tempAnalysisData.get(activeTab.id)!.plan.map((item, index) => (
+                    <div key={index} className="analysis-item">
+                      <label className="checkbox-label">
+                        <input 
+                          type="checkbox" 
+                          checked={item.completed}
+                          onChange={(e) => setTempAnalysisData(prev => {
+                            const current = prev.get(activeTab.id);
+                            if (current) {
+                              return new Map(prev).set(activeTab.id, {
+                                ...current,
+                                plan: current.plan.map((planItem, i) => 
+                                  i === index ? { ...planItem, completed: e.target.checked } : planItem
+                                )
+                              });
+                            }
+                            return prev;
+                          })}
+                        />
+                        <span>{item.text}</span>
+                      </label>
+                    </div>
+                  ))
+                ) : (
+                  <p className="empty-placeholder">Плановый ход работы не указан в описании документа</p>
+                )}
+              </div>
+
+              <div className="button-group">
+                <button className="primary" onClick={() => saveAnalysisAndSwitchToEdit()}>Сохранить</button>
+                <button className="secondary" onClick={() => cancelAnalysisEdit()}>Отмена</button>
+              </div>
+            </div>
+          )}
+
+          {activeTab?.type === 'doc' && activeTab?.mode === 'view' && (
+            <ViewMode 
+              meta={tempDescriptionMeta.get(activeTab.id) || activeTab?.data?.meta || {title: '', description: '', goals: '', hypotheses: '', plan: ''}}
+              content={activeTab?.data?.contentHtml || activeTab?.data?.content || ''}
+              analysisData={tempAnalysisData.get(activeTab.id) || activeTab?.data?.meta?.analysis || {conclusions: '', goals: [], hypotheses: [], plan: []}}
+              tabData={activeTab?.data}
+            />
+          )}
+
+          {activeTab?.type === 'doc' && activeTab?.mode === 'edit' && (
             <div>
               <div className={`sticky-tools ${activeTool ? 'has-active' : 'no-active'}`}>
                 {activeTool !== null && (
@@ -1571,6 +2927,8 @@ export const App: React.FC = () => {
                     <button className={`tool ${editor?.isActive('codeBlock') ? 'active' : ''}`} title="Блок кода" onClick={() => editor?.chain().focus().toggleCodeBlock().run()}><RiCodeBoxLine /></button>
                     {/* Image (kept here) */}
                     <button className="tool" title="Вставить изображение" onClick={async () => { const r = await window.api.pickImage(); if (!r?.canceled && (r as any).dataUrl) editor?.chain().focus().setImage({ src: (r as any).dataUrl }).run(); }}><RiImageLine /></button>
+                    {/* Page Break */}
+                    <button className="tool" title="Разрыв страницы (Ctrl+Enter)" onClick={() => editor?.chain().focus().setPageBreak().run()}><RiSeparator /></button>
                   </div>
                   <div className="tool-sep" aria-hidden="true" />
                   {/* Group: Sub/Superscript */}
@@ -1758,6 +3116,19 @@ export const App: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Profile Modal */}
+      {showProfileModal && (
+        <ProfileModal 
+          user={user}
+          onClose={() => setShowProfileModal(false)}
+          onUpdate={(updatedUser) => {
+            // Update user data - you might want to implement this
+            console.log('User updated:', updatedUser);
+            setShowProfileModal(false);
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -2712,4 +4083,14 @@ const GraphsBar: React.FC<{ editor: any; selectedGraph: any; setSelectedGraph: (
   );
 };
 
+// Main App component with authentication wrapper
+export const App: React.FC = () => {
+  return (
+    <AuthWrapper>
+      {(user, sessionToken, logout) => (
+        <AppContent user={user} sessionToken={sessionToken} logout={logout} />
+      )}
+    </AuthWrapper>
+  );
+};
 
