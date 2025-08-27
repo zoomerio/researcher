@@ -76,10 +76,13 @@ const api = {
   getUserDocuments: (payload) => ipcRenderer.invoke('documents:get-user-documents', payload),
   getAllDocuments: () => ipcRenderer.invoke('documents:get-all'),
   getDocumentById: (payload) => ipcRenderer.invoke('documents:get-by-id', payload),
-  getDocumentByPath: (payload) => ipcRenderer.invoke('documents:get-by-path', payload),
+  getDocumentByPath: (filePath) => ipcRenderer.invoke('documents:get-by-path', filePath),
   deleteDocument: (payload) => ipcRenderer.invoke('documents:delete', payload),
   searchDocuments: (payload) => ipcRenderer.invoke('documents:search', payload),
   generateDocumentCover: (payload) => ipcRenderer.invoke('documents:generate-cover', payload),
+  // User management
+  getAllUsers: () => ipcRenderer.invoke('users:get-all'),
+  updateUserProfile: (payload) => ipcRenderer.invoke('users:update-profile', payload),
 };
 
 contextBridge.exposeInMainWorld('api', api);

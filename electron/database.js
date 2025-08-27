@@ -515,6 +515,76 @@ class UserDatabase {
     }
   }
 
+  // Get all users with document counts
+  getAllUsers() {
+    try {
+      const users = this.db.prepare(`
+        SELECT 
+          u.id, u.username, u.full_name, u.group_id, u.created_at, u.last_login,
+          COUNT(d.id) as document_count
+        FROM users u
+        LEFT JOIN documents d ON u.id = d.author_id
+        GROUP BY u.id, u.username, u.full_name, u.group_id, u.created_at, u.last_login
+        ORDER BY u.full_name
+      `).all();
+      
+      const formattedUsers = users.map(user => ({
+        id: user.id,
+        username: user.username,
+        fullName: user.full_name,
+        groupId: user.group_id,
+        createdAt: user.created_at,
+        lastLogin: user.last_login,
+        documentCount: user.document_count
+      }));
+      
+      return { success: true, users: formattedUsers };
+    } catch (error) {
+      console.error('[Database] Get all users error:', error);
+      return { success: false, error: 'Failed to get users' };
+    }
+  }
+
+  // Update user profile
+  updateUserProfile(userId, fullName, groupId, currentPassword = null, newPassword = null) {
+    try {
+      // If changing password, verify current password first
+      if (newPassword && currentPassword) {
+        const user = this.db.prepare('SELECT password_hash, salt FROM users WHERE id = ?').get(userId);
+        if (!user) {
+          return { success: false, error: 'User not found' };
+        }
+        
+        const { hash } = this.hashPassword(currentPassword, user.salt);
+        if (hash !== user.password_hash) {
+          return { success: false, error: 'Current password is incorrect' };
+        }
+      }
+      
+      // Update profile information
+      if (newPassword) {
+        const { hash, salt } = this.hashPassword(newPassword);
+        this.db.prepare(`
+          UPDATE users 
+          SET full_name = ?, group_id = ?, password_hash = ?, salt = ?
+          WHERE id = ?
+        `).run(fullName, groupId, hash, salt, userId);
+      } else {
+        this.db.prepare(`
+          UPDATE users 
+          SET full_name = ?, group_id = ?
+          WHERE id = ?
+        `).run(fullName, groupId, userId);
+      }
+      
+      console.log(`[Database] User profile updated: ${userId}`);
+      return { success: true, message: 'Profile updated successfully' };
+    } catch (error) {
+      console.error('[Database] Update user profile error:', error);
+      return { success: false, error: 'Failed to update profile' };
+    }
+  }
+
   // Close database connection
   close() {
     if (this.db) {

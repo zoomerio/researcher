@@ -1139,7 +1139,7 @@ ipcMain.handle('documents:get-by-id', async (_event, { documentId }) => {
   }
 });
 
-ipcMain.handle('documents:get-by-path', async (_event, { filePath }) => {
+ipcMain.handle('documents:get-by-path', async (_event, filePath) => {
   try {
     console.log('[Main] Getting document by path:', filePath);
     const result = userDatabase.getDocumentByPath(filePath);
@@ -1170,6 +1170,30 @@ ipcMain.handle('documents:search', async (_event, { query, userId }) => {
     return { success: false, error: 'Failed to search documents' };
   }
 });
+
+// Get all users
+ipcMain.handle('users:get-all', async () => {
+  try {
+    const result = userDatabase.getAllUsers();
+    return result;
+  } catch (error) {
+    console.error('[Users] Get all users error:', error);
+    return { success: false, error: 'Failed to get users' };
+  }
+});
+
+// Update user profile
+ipcMain.handle('users:update-profile', async (_event, { userId, fullName, groupId, currentPassword, newPassword }) => {
+  try {
+    const result = userDatabase.updateUserProfile(userId, fullName, groupId, currentPassword, newPassword);
+    return result;
+  } catch (error) {
+    console.error('[Users] Update profile error:', error);
+    return { success: false, error: 'Failed to update profile' };
+  }
+});
+
+
 
 // Document cover generation
 ipcMain.handle('documents:generate-cover', async (_event, { htmlContent, filePath, oldCoverPath }) => {

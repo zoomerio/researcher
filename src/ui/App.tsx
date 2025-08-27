@@ -26,6 +26,9 @@ import { IllustrationNode } from '../tiptap/IllustrationNode';
 import PageBreak from '../tiptap/PageBreak';
 import { AuthWrapper } from '../components/AuthWrapper';
 import { DocumentLibrary } from '../components/DocumentLibrary';
+import { UsersList } from '../components/UsersList';
+import { RecentDocuments } from '../components/RecentDocuments';
+import { ProfileModal } from '../components/ProfileModal';
 import {
   RiBold,
   RiItalic,
@@ -468,6 +471,14 @@ const ViewMode: React.FC<{
     editable: false, // Read-only
   });
 
+  // Update editor content when props change
+  React.useEffect(() => {
+    if (viewEditor) {
+      const newContent = generateViewModeHtml();
+      viewEditor.commands.setContent(newContent);
+    }
+  }, [viewEditor, meta, content, analysisData, tabData]);
+
   return (
     <div className="view-mode">
       <EditorContent editor={viewEditor} />
@@ -480,7 +491,11 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
   const [tabs, setTabs] = useState<Tab[]>([
     { id: 'home', title: 'Начало', closable: false, type: 'home' },
   ]);
-  const [sidebarView, setSidebarView] = useState<'users' | 'research' | 'recent'>('users');
+  const [sidebarView, setSidebarView] = useState<'users' | 'research' | 'recent'>('recent');
+  const [recentDocuments, setRecentDocuments] = useState<string[]>([]);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [unsavedChanges, setUnsavedChanges] = useState<Set<string>>(new Set());
+  const [originalContent, setOriginalContent] = useState<Map<string, string>>(new Map());
 
   const [docMeta, setDocMeta] = useState<DocMeta>({
     title: '',
@@ -513,12 +528,133 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
     tabId: string;
   } | null>(null);
 
-  // Temporary state for description editing (not saved until user clicks Save)
-  const [tempDescriptionMeta, setTempDescriptionMeta] = useState<DocMeta | null>(null);
+  // Temporary state for description editing (per-tab, not saved until user clicks Save)
+  const [tempDescriptionMeta, setTempDescriptionMeta] = useState<Map<string, DocMeta>>(new Map());
   
-  // Temporary state for analysis editing
-  const [tempAnalysisData, setTempAnalysisData] = useState<AnalysisData | null>(null);
+  // Temporary state for analysis editing (per-tab)
+  const [tempAnalysisData, setTempAnalysisData] = useState<Map<string, AnalysisData>>(new Map());
   
+  // Recent documents management
+  const addToRecentDocuments = (filePath: string) => {
+    setRecentDocuments(prev => {
+      const updated = [filePath, ...prev.filter(path => path !== filePath)].slice(0, 5);
+      // Save to localStorage
+      localStorage.setItem(`recentDocuments_${user.id}`, JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Load recent documents on component mount
+  React.useEffect(() => {
+    const saved = localStorage.getItem(`recentDocuments_${user.id}`);
+    if (saved) {
+      try {
+        setRecentDocuments(JSON.parse(saved));
+      } catch (error) {
+        console.error('Failed to load recent documents:', error);
+      }
+    }
+  }, [user.id]);
+
+  // Track content changes
+  const trackContentChange = (tabId: string, currentContent: string) => {
+    const original = originalContent.get(tabId);
+    if (original && original !== currentContent) {
+      setUnsavedChanges(prev => new Set(prev).add(tabId));
+    } else if (original && original === currentContent) {
+      setUnsavedChanges(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(tabId);
+        return newSet;
+      });
+    }
+  };
+
+  // Set original content when document is loaded
+  const setOriginalContentForTab = (tabId: string, content: string) => {
+    setOriginalContent(prev => new Map(prev).set(tabId, content));
+    // Remove from unsaved changes when setting original content
+    setUnsavedChanges(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(tabId);
+      return newSet;
+    });
+  };
+
+  // Check if tab has unsaved changes
+  const hasUnsavedChanges = (tabId: string) => {
+    return unsavedChanges.has(tabId);
+  };
+
+  // Handle tab close with confirmation
+  const handleTabClose = async (tabId: string): Promise<boolean> => {
+    if (!hasUnsavedChanges(tabId)) {
+      return true; // Allow close
+    }
+
+    const tab = tabs.find(t => t.id === tabId);
+    const result = await showSaveConfirmation(tab?.title || 'Документ');
+    
+    if (result === 'save') {
+      // Try to save the document
+      const saved = await saveCurrentDocument();
+      if (saved) {
+        // Clear unsaved changes after successful save
+        setUnsavedChanges(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(tabId);
+          return newSet;
+        });
+        return true;
+      }
+      return false; // Save failed, don't close
+    } else if (result === 'discard') {
+      // Clear unsaved changes and allow close
+      setUnsavedChanges(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(tabId);
+        return newSet;
+      });
+      return true;
+    }
+    
+    return false; // Cancel close
+  };
+
+  // Show save confirmation dialog
+  const showSaveConfirmation = (documentTitle: string): Promise<'save' | 'discard' | 'cancel'> => {
+    return new Promise((resolve) => {
+      const result = confirm(
+        `Документ "${documentTitle}" содержит несохранённые изменения.\n\n` +
+        `Нажмите "OK" чтобы сохранить изменения, или "Отмена" чтобы закрыть без сохранения.`
+      );
+      
+      if (result) {
+        resolve('save');
+      } else {
+        const discard = confirm(
+          `Вы уверены, что хотите закрыть документ без сохранения изменений?\n\n` +
+          `Все несохранённые изменения будут потеряны.`
+        );
+        resolve(discard ? 'discard' : 'cancel');
+      }
+    });
+  };
+
+  // Save current document and return success status
+  const saveCurrentDocument = async (): Promise<boolean> => {
+    if (!activeTab || activeTab.type !== 'doc') return false;
+    
+    try {
+      // Use the existing save function
+      await save();
+      return true;
+    } catch (error) {
+      console.error('Error saving document:', error);
+      return false;
+    }
+  };
+
   // detach is triggered by double-click now; DnD used for reorder and reattach only
 
   // Memory optimization: Periodically trigger garbage collection and cleanup
@@ -1070,6 +1206,21 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
     };
   }, [editor]);
 
+  // Track editor content changes for unsaved changes detection
+  useEffect(() => {
+    if (!editor || !activeTab || activeTab.type !== 'doc') return;
+
+    const handleUpdate = () => {
+      const currentContent = editor.getHTML();
+      trackContentChange(activeTab.id, currentContent);
+    };
+
+    editor.on('update', handleUpdate);
+    return () => {
+      editor.off('update', handleUpdate);
+    };
+  }, [editor, activeTab]);
+
   // Debug Mathematics extension and handle math editing
   useEffect(() => {
     if (!editor) return;
@@ -1372,11 +1523,34 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
     setActiveTabSafely(id);
   }
 
-  function closeTab(id: string) {
+  async function closeTab(id: string) {
+    const canClose = await handleTabClose(id);
+    if (!canClose) return;
+
     setTabs((prev) => {
       const next = prev.filter((t) => t.id !== id || !t.closable);
       return next;
     });
+    
+    // Clean up tracking data and temporary states
+    setOriginalContent(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(id);
+      return newMap;
+    });
+    
+    setTempDescriptionMeta(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(id);
+      return newMap;
+    });
+    
+    setTempAnalysisData(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(id);
+      return newMap;
+    });
+    
     if (activeTabId === id) {
       const nextTabs = tabs.filter((t) => t.id !== id || !t.closable);
       const home = nextTabs.find((t) => t.type === 'home');
@@ -1405,6 +1579,8 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
       return nextTabs;
     });
     setActiveTabSafely(id);
+    // Set original content for tracking changes
+    setOriginalContentForTab(id, data.contentHtml || '<p></p>');
   }
 
   // Drag and drop reordering of tabs
@@ -1520,7 +1696,7 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
     if (mode === 'description' && tab?.type === 'doc') {
       // When entering description mode, save current state as temporary state
       const currentMeta = tab.data?.meta as DocMeta;
-      setTempDescriptionMeta({ ...currentMeta });
+      setTempDescriptionMeta(prev => new Map(prev).set(tabId, { ...currentMeta }));
     } else if (mode === 'analysis' && tab?.type === 'doc') {
       // When entering analysis mode, initialize analysis data
       const currentMeta = tab.data?.meta as DocMeta;
@@ -1560,46 +1736,65 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
         plan: mergeAnalysisItems(docMeta.plan, existingAnalysis?.plan)
       };
       
-      setTempAnalysisData(analysisData);
+      setTempAnalysisData(prev => new Map(prev).set(tabId, analysisData));
     } else if (mode === 'view' && tab?.type === 'doc') {
-      // When entering view mode, initialize temp states with current data
-      const currentMeta = tab.data?.meta as DocMeta;
-      setTempDescriptionMeta({ ...currentMeta });
+      // When entering view mode, initialize temp states with the tab's current meta data
+      // Only set if not already exists for this tab to preserve any existing temporary state
+      if (!tempDescriptionMeta.has(tabId)) {
+        const currentMeta = tab.data?.meta as DocMeta;
+        // Use the current docMeta if this is the active tab (includes unsaved changes)
+        // Otherwise use the stored tab meta
+        const metaToUse = tabId === activeTabId ? docMeta : currentMeta;
+        setTempDescriptionMeta(prev => new Map(prev).set(tabId, { ...metaToUse }));
+      }
       
-      // Initialize analysis data for view mode
-      const existingAnalysis = currentMeta.analysis;
-      const parseTextToItems = (text: string): AnalysisItem[] => {
-        if (!text.trim()) return [];
-        return text.split('\n').filter(line => line.trim()).map(line => ({
-          text: line.trim(),
-          completed: false
-        }));
-      };
+      // Initialize analysis data for view mode only if not already exists
+      if (!tempAnalysisData.has(tabId)) {
+        const currentMeta = tab.data?.meta as DocMeta;
+        const existingAnalysis = currentMeta.analysis;
+        const parseTextToItems = (text: string): AnalysisItem[] => {
+          if (!text.trim()) return [];
+          return text.split('\n').filter(line => line.trim()).map(line => ({
+            text: line.trim(),
+            completed: false
+          }));
+        };
 
-      const mergeAnalysisItems = (newText: string, existingItems: AnalysisItem[] = []): AnalysisItem[] => {
-        const newItems = parseTextToItems(newText);
-        const completionMap = new Map<string, boolean>();
-        existingItems.forEach(item => {
-          completionMap.set(item.text, item.completed);
-        });
-        return newItems.map(newItem => ({
-          text: newItem.text,
-          completed: completionMap.get(newItem.text) || false
-        }));
-      };
+        const mergeAnalysisItems = (newText: string, existingItems: AnalysisItem[] = []): AnalysisItem[] => {
+          const newItems = parseTextToItems(newText);
+          const completionMap = new Map<string, boolean>();
+          existingItems.forEach(item => {
+            completionMap.set(item.text, item.completed);
+          });
+          return newItems.map(newItem => ({
+            text: newItem.text,
+            completed: completionMap.get(newItem.text) || false
+          }));
+        };
 
-      const analysisData: AnalysisData = {
-        conclusions: existingAnalysis?.conclusions || '',
-        goals: mergeAnalysisItems(docMeta.goals, existingAnalysis?.goals),
-        hypotheses: mergeAnalysisItems(docMeta.hypotheses, existingAnalysis?.hypotheses),
-        plan: mergeAnalysisItems(docMeta.plan, existingAnalysis?.plan)
-      };
-      
-      setTempAnalysisData(analysisData);
+        // Use the current docMeta if this is the active tab, otherwise use stored meta
+        const metaForAnalysis = tabId === activeTabId ? docMeta : currentMeta;
+        const analysisData: AnalysisData = {
+          conclusions: existingAnalysis?.conclusions || '',
+          goals: mergeAnalysisItems(metaForAnalysis.goals, existingAnalysis?.goals),
+          hypotheses: mergeAnalysisItems(metaForAnalysis.hypotheses, existingAnalysis?.hypotheses),
+          plan: mergeAnalysisItems(metaForAnalysis.plan, existingAnalysis?.plan)
+        };
+        
+        setTempAnalysisData(prev => new Map(prev).set(tabId, analysisData));
+      }
     } else if (mode === 'edit') {
-      // When leaving any mode, clear temporary states
-      setTempDescriptionMeta(null);
-      setTempAnalysisData(null);
+      // When leaving any mode, clear temporary states for this tab
+      setTempDescriptionMeta(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(tabId);
+        return newMap;
+      });
+      setTempAnalysisData(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(tabId);
+        return newMap;
+      });
     }
     
     setTabs((prev) => prev.map((tab) => 
@@ -1609,25 +1804,28 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
 
   // Save description and switch to edit mode
   function saveDescriptionAndSwitchToEdit() {
-    if (activeTab?.type === 'doc' && tempDescriptionMeta) {
-      // Save the temporary state to the actual tab data
-      setTabs((prev) => prev.map((tab) => 
-        tab.id === activeTab.id 
-          ? { 
-              ...tab, 
-              title: tempDescriptionMeta.title || tab.title,
-              data: { ...tab.data, meta: { ...tempDescriptionMeta } }
-            }
-          : tab
-      ));
-      switchTabMode(activeTab.id, 'edit');
+    if (activeTab?.type === 'doc') {
+      const tempMeta = tempDescriptionMeta.get(activeTab.id);
+      if (tempMeta) {
+        // Save the temporary state to the actual tab data
+        setTabs((prev) => prev.map((tab) => 
+          tab.id === activeTab.id 
+            ? { 
+                ...tab, 
+                title: tempMeta.title || tab.title,
+                data: { ...tab.data, meta: { ...tempMeta } }
+              }
+            : tab
+        ));
+        switchTabMode(activeTab.id, 'edit');
+      }
     }
   }
 
   // Cancel description edit and switch back to edit mode
   function cancelDescriptionEdit() {
-    if (activeTab?.type === 'doc' && tempDescriptionMeta) {
-      // Restore original meta from the temporary state (which contains the original values)
+    if (activeTab?.type === 'doc') {
+      // Restore original meta from the tab data
       const originalMeta = activeTab.data?.meta as DocMeta;
       if (originalMeta) {
         setDocMeta({ ...originalMeta });
@@ -1638,23 +1836,26 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
 
   // Save analysis and switch to edit mode
   function saveAnalysisAndSwitchToEdit() {
-    if (activeTab?.type === 'doc' && tempAnalysisData) {
-      // Save the analysis data to the actual tab data
-      setTabs((prev) => prev.map((tab) => 
-        tab.id === activeTab.id 
-          ? { 
-              ...tab, 
-              data: { 
-                ...tab.data, 
-                meta: { 
-                  ...tab.data.meta, 
-                  analysis: { ...tempAnalysisData } 
-                } 
+    if (activeTab?.type === 'doc') {
+      const tempAnalysis = tempAnalysisData.get(activeTab.id);
+      if (tempAnalysis) {
+        // Save the analysis data to the actual tab data
+        setTabs((prev) => prev.map((tab) => 
+          tab.id === activeTab.id 
+            ? { 
+                ...tab, 
+                data: { 
+                  ...tab.data, 
+                  meta: { 
+                    ...tab.data.meta, 
+                    analysis: { ...tempAnalysis } 
+                  } 
+                }
               }
-            }
-          : tab
-      ));
-      switchTabMode(activeTab.id, 'edit');
+            : tab
+        ));
+        switchTabMode(activeTab.id, 'edit');
+      }
     }
   }
 
@@ -2122,9 +2323,14 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
       const meta = t.data?.meta as DocMeta;
       const html = t.data?.contentHtml as string;
       
-      // If we're in description mode and have temporary state, use that instead
-      if (t.mode === 'description' && tempDescriptionMeta) {
-        setDocMeta({ ...tempDescriptionMeta });
+      // If we're in description mode and have temporary state for this tab, use that instead
+      if (t.mode === 'description') {
+        const tempMeta = tempDescriptionMeta.get(t.id);
+        if (tempMeta) {
+          setDocMeta({ ...tempMeta });
+        } else {
+          setDocMeta({ ...meta });
+        }
       } else {
         setDocMeta({ ...meta });
       }
@@ -2150,7 +2356,13 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
       if (t.type === 'doc') {
         // If we're in description mode, only update temporary state, not the actual tab data
         if (t.mode === 'description') {
-          setTempDescriptionMeta((prev) => prev ? { ...prev, [key]: value } : null);
+          setTempDescriptionMeta((prev) => {
+            const currentTemp = prev.get(t.id);
+            if (currentTemp) {
+              return new Map(prev).set(t.id, { ...currentTemp, [key]: value });
+            }
+            return prev;
+          });
         } else {
           // For edit mode, update the stored meta data immediately
           setTabs((prev) => prev.map((tab) => tab.id === t.id ? { ...tab, title: key === 'title' ? (value as string) || tab.title : tab.title, data: { ...tab.data, meta: { ...tab.data.meta, [key]: value } } } : tab));
@@ -2174,7 +2386,7 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
         {tabs.map((t) => (
           <div
             key={t.id}
-            className={`tab ${activeTabId === t.id ? 'active' : ''} ${t.type !== 'home' ? 'draggable' : ''} ${draggingTabId === t.id ? 'dragging' : ''} ${dropTargetId === t.id ? (dropBefore ? 'drop-before' : 'drop-after') : ''}`}
+            className={`tab ${activeTabId === t.id ? 'active' : ''} ${t.type !== 'home' ? 'draggable' : ''} ${t.type === 'home' ? 'home-tab' : ''} ${draggingTabId === t.id ? 'dragging' : ''} ${dropTargetId === t.id ? (dropBefore ? 'drop-before' : 'drop-after') : ''}`}
               onClick={() => setActiveTabSafely(t.id)}
               onDoubleClick={() => {
                 // Detach on double-click
@@ -2196,7 +2408,7 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
           >
             <span className="title">{t.type === 'home' ? <RiMenuLine /> : t.title}</span>
               {t.closable && (
-                <button className="close" aria-label="Close tab" title="Close" onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}>
+                <button className="close" aria-label="Close tab" title="Close" onClick={async (e) => { e.stopPropagation(); await closeTab(t.id); }}>
                   ✕
                 </button>
               )}
@@ -2267,9 +2479,42 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
       
       {hasSidebar && (
         <div className="sidebar">
-          <button onClick={() => setSidebarView('users')}>Пользователи</button>
-          <button onClick={() => setSidebarView('research')}>Исследования</button>
-          <button onClick={() => setSidebarView('recent')}>Недавнее</button>
+          <div className="sidebar-header">
+            <div className="user-profile">
+              <button 
+                className="profile-btn"
+                onClick={() => setShowProfileModal(true)}
+                title="Мой профиль"
+              >
+                <span className="profile-icon">👤</span>
+                <span className="profile-name">{user.fullName}</span>
+              </button>
+            </div>
+          </div>
+          
+          <div className="sidebar-nav">
+            <button 
+              className={`nav-btn ${sidebarView === 'recent' ? 'active' : ''}`}
+              onClick={() => setSidebarView('recent')}
+            >
+              <span className="nav-icon">🕐</span>
+              <span className="nav-text">Недавнее</span>
+            </button>
+            <button 
+              className={`nav-btn ${sidebarView === 'research' ? 'active' : ''}`}
+              onClick={() => setSidebarView('research')}
+            >
+              <span className="nav-icon">📄</span>
+              <span className="nav-text">Исследования</span>
+            </button>
+            <button 
+              className={`nav-btn ${sidebarView === 'users' ? 'active' : ''}`}
+              onClick={() => setSidebarView('users')}
+            >
+              <span className="nav-icon">👥</span>
+              <span className="nav-text">Пользователи</span>
+            </button>
+          </div>
         </div>
       )}
       <div className="content">
@@ -2278,7 +2523,7 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
             ? 'conduct-mode' 
             : 'padded-mode'
         }`} ref={viewRef}>
-          {activeTab?.type === 'home' && sidebarView !== 'research' && (
+          {activeTab?.type === 'home' && sidebarView !== 'research' && sidebarView !== 'users' && sidebarView !== 'recent' && (
             <div>
               <h2>Добро пожаловать в Researcher</h2>
               <p className="section-title">Навигация</p>
@@ -2301,8 +2546,38 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
                   if (!result.canceled && result.data) {
                     console.log('[DocumentLibrary] Loading document data into new tab...');
                     openLoadedDoc(result.data, result.filePath);
+                    addToRecentDocuments(filePath);
                   } else {
                     console.error('[DocumentLibrary] Failed to open document - no data or canceled');
+                  }
+                } catch (error) {
+                  console.error('Failed to open document:', error);
+                }
+              }}
+            />
+          )}
+
+          {/* Users content shown when sidebar view is 'users' */}
+          {sidebarView === 'users' && activeTab?.type === 'home' && (
+            <UsersList user={user} />
+          )}
+
+          {/* Recent documents content shown when sidebar view is 'recent' */}
+          {sidebarView === 'recent' && activeTab?.type === 'home' && (
+            <RecentDocuments 
+              user={user} 
+              recentDocuments={recentDocuments}
+              onOpenDocument={async (filePath) => {
+                try {
+                  console.log('[RecentDocuments] Opening document:', filePath);
+                  const result = await window.api.openDocumentPath(filePath);
+                  console.log('[RecentDocuments] Open document result:', result);
+                  if (!result.canceled && result.data) {
+                    console.log('[RecentDocuments] Loading document data into new tab...');
+                    openLoadedDoc(result.data, result.filePath);
+                    addToRecentDocuments(filePath);
+                  } else {
+                    console.error('[RecentDocuments] Failed to open document - no data or canceled');
                   }
                 } catch (error) {
                   console.error('Failed to open document:', error);
@@ -2353,27 +2628,39 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
               
               <label>Выводы</label>
               <textarea 
-                value={tempAnalysisData?.conclusions || ''} 
-                onChange={(e) => setTempAnalysisData(prev => prev ? { ...prev, conclusions: e.target.value } : null)}
+                value={tempAnalysisData.get(activeTab.id)?.conclusions || ''} 
+                onChange={(e) => setTempAnalysisData(prev => {
+                  const current = prev.get(activeTab.id);
+                  if (current) {
+                    return new Map(prev).set(activeTab.id, { ...current, conclusions: e.target.value });
+                  }
+                  return prev;
+                })}
                 placeholder="Введите ваши выводы по результатам исследования..."
               />
 
               {/* Goals Section */}
               <div className="analysis-section">
                 <h3>Цели</h3>
-                {tempAnalysisData?.goals && tempAnalysisData.goals.length > 0 ? (
-                  tempAnalysisData.goals.map((item, index) => (
+                {tempAnalysisData.get(activeTab.id)?.goals && tempAnalysisData.get(activeTab.id)!.goals.length > 0 ? (
+                  tempAnalysisData.get(activeTab.id)!.goals.map((item, index) => (
                     <div key={index} className="analysis-item">
                       <label className="checkbox-label">
                         <input 
                           type="checkbox" 
                           checked={item.completed}
-                          onChange={(e) => setTempAnalysisData(prev => prev ? {
-                            ...prev,
-                            goals: prev.goals.map((goal, i) => 
-                              i === index ? { ...goal, completed: e.target.checked } : goal
-                            )
-                          } : null)}
+                          onChange={(e) => setTempAnalysisData(prev => {
+                            const current = prev.get(activeTab.id);
+                            if (current) {
+                              return new Map(prev).set(activeTab.id, {
+                                ...current,
+                                goals: current.goals.map((goal, i) => 
+                                  i === index ? { ...goal, completed: e.target.checked } : goal
+                                )
+                              });
+                            }
+                            return prev;
+                          })}
                         />
                         <span>{item.text}</span>
                       </label>
@@ -2387,19 +2674,25 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
               {/* Hypotheses Section */}
               <div className="analysis-section">
                 <h3>Гипотезы</h3>
-                {tempAnalysisData?.hypotheses && tempAnalysisData.hypotheses.length > 0 ? (
-                  tempAnalysisData.hypotheses.map((item, index) => (
+                {tempAnalysisData.get(activeTab.id)?.hypotheses && tempAnalysisData.get(activeTab.id)!.hypotheses.length > 0 ? (
+                  tempAnalysisData.get(activeTab.id)!.hypotheses.map((item, index) => (
                     <div key={index} className="analysis-item">
                       <label className="checkbox-label">
                         <input 
                           type="checkbox" 
                           checked={item.completed}
-                          onChange={(e) => setTempAnalysisData(prev => prev ? {
-                            ...prev,
-                            hypotheses: prev.hypotheses.map((hypothesis, i) => 
-                              i === index ? { ...hypothesis, completed: e.target.checked } : hypothesis
-                            )
-                          } : null)}
+                          onChange={(e) => setTempAnalysisData(prev => {
+                            const current = prev.get(activeTab.id);
+                            if (current) {
+                              return new Map(prev).set(activeTab.id, {
+                                ...current,
+                                hypotheses: current.hypotheses.map((hypothesis, i) => 
+                                  i === index ? { ...hypothesis, completed: e.target.checked } : hypothesis
+                                )
+                              });
+                            }
+                            return prev;
+                          })}
                         />
                         <span>{item.text}</span>
                       </label>
@@ -2413,19 +2706,25 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
               {/* Plan Section */}
               <div className="analysis-section">
                 <h3>Плановый ход работы</h3>
-                {tempAnalysisData?.plan && tempAnalysisData.plan.length > 0 ? (
-                  tempAnalysisData.plan.map((item, index) => (
+                {tempAnalysisData.get(activeTab.id)?.plan && tempAnalysisData.get(activeTab.id)!.plan.length > 0 ? (
+                  tempAnalysisData.get(activeTab.id)!.plan.map((item, index) => (
                     <div key={index} className="analysis-item">
                       <label className="checkbox-label">
                         <input 
                           type="checkbox" 
                           checked={item.completed}
-                          onChange={(e) => setTempAnalysisData(prev => prev ? {
-                            ...prev,
-                            plan: prev.plan.map((planItem, i) => 
-                              i === index ? { ...planItem, completed: e.target.checked } : planItem
-                            )
-                          } : null)}
+                          onChange={(e) => setTempAnalysisData(prev => {
+                            const current = prev.get(activeTab.id);
+                            if (current) {
+                              return new Map(prev).set(activeTab.id, {
+                                ...current,
+                                plan: current.plan.map((planItem, i) => 
+                                  i === index ? { ...planItem, completed: e.target.checked } : planItem
+                                )
+                              });
+                            }
+                            return prev;
+                          })}
                         />
                         <span>{item.text}</span>
                       </label>
@@ -2445,9 +2744,9 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
 
           {activeTab?.type === 'doc' && activeTab?.mode === 'view' && (
             <ViewMode 
-              meta={tempDescriptionMeta || {title: '', description: '', goals: '', hypotheses: '', plan: ''}}
+              meta={tempDescriptionMeta.get(activeTab.id) || activeTab?.data?.meta || {title: '', description: '', goals: '', hypotheses: '', plan: ''}}
               content={activeTab?.data?.contentHtml || activeTab?.data?.content || ''}
-              analysisData={tempAnalysisData || {conclusions: '', goals: [], hypotheses: [], plan: []}}
+              analysisData={tempAnalysisData.get(activeTab.id) || activeTab?.data?.meta?.analysis || {conclusions: '', goals: [], hypotheses: [], plan: []}}
               tabData={activeTab?.data}
             />
           )}
@@ -2817,6 +3116,19 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
           )}
         </div>
       </div>
+
+      {/* Profile Modal */}
+      {showProfileModal && (
+        <ProfileModal 
+          user={user}
+          onClose={() => setShowProfileModal(false)}
+          onUpdate={(updatedUser) => {
+            // Update user data - you might want to implement this
+            console.log('User updated:', updatedUser);
+            setShowProfileModal(false);
+          }}
+        />
+      )}
     </div>
   );
 };
