@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import kgeuLogoUrl from '../../kgeu_logo_svg.png';
 
 interface LoginProps {
   onLogin: (user: any, sessionToken: string) => void;
@@ -61,6 +62,11 @@ export function Login({ onLogin, onSwitchToRegister }: LoginProps) {
   return (
     <div className="auth-container">
       <div className="auth-form">
+        <div className="auth-brand">
+          <div className="auth-logo-box">
+            <div className="auth-logo" style={{ backgroundImage: `url(${kgeuLogoUrl})` }} />
+          </div>
+        </div>
         <h2>Вход в систему</h2>
         <form onSubmit={handleSubmit}>
           <div className="form-group">

@@ -54,6 +54,7 @@ const api = {
     ipcRenderer.removeAllListeners('external:drag-end');
     ipcRenderer.on('external:drag-end', () => cb());
   },
+  confirmCloseWithUnsaved: (payload) => ipcRenderer.invoke('dialog:confirm-close-with-unsaved', payload),
   cleanupDocumentTemp: (tempDir) => ipcRenderer.invoke('document:cleanup-temp', tempDir),
   createTempImage: (payload) => ipcRenderer.invoke('image:create-temp', payload),
   saveTempImageEdit: (payload) => ipcRenderer.invoke('image:save-temp-edit', payload),
@@ -83,6 +84,14 @@ const api = {
   // User management
   getAllUsers: () => ipcRenderer.invoke('users:get-all'),
   updateUserProfile: (payload) => ipcRenderer.invoke('users:update-profile', payload),
+  // Window controls
+  windowMinimize: () => ipcRenderer.invoke('window:controls', 'minimize'),
+  windowMaximizeToggle: () => ipcRenderer.invoke('window:controls', 'maximize'),
+  windowClose: () => ipcRenderer.invoke('window:controls', 'close'),
+  onWindowMaximizeChanged: (cb) => {
+    ipcRenderer.removeAllListeners('window:maximize-changed');
+    ipcRenderer.on('window:maximize-changed', (_e, maximized) => cb(maximized));
+  },
 };
 
 contextBridge.exposeInMainWorld('api', api);

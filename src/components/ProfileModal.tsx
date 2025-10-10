@@ -48,7 +48,12 @@ export function ProfileModal({ user, onClose, onUpdate }: ProfileModalProps) {
 
     try {
       setLoading(true);
-      const result = await window.api.updateUserProfile({
+      const api = (window as any).api;
+      if (!api || !api.updateUserProfile) {
+        setError('Обновление профиля недоступно в этой сборке');
+        return;
+      }
+      const result = await api.updateUserProfile({
         userId: user.id,
         fullName: formData.fullName,
         groupId: formData.groupId,
@@ -183,3 +188,10 @@ export function ProfileModal({ user, onClose, onUpdate }: ProfileModalProps) {
     </div>
   );
 }
+
+
+
+
+
+
+

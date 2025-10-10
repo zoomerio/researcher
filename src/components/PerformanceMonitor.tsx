@@ -27,8 +27,8 @@ const PerformanceMonitorComponent = ({ isVisible = false, position = 'top-right'
       if (!isVisible) return;
       
       const interval = setInterval(async () => {
-        // Get memory info
-        const memoryInfo = await memoryMonitor.getCurrentMemoryInfo();
+        // Get memory info (use public logger which returns info)
+        const memoryInfo = await memoryMonitor.logMemoryInfo('PerfMonitor');
         
         // Update performance data (this would be populated by usePerformanceMonitor hooks)
         setPerformanceData(prev => {

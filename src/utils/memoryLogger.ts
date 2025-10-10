@@ -142,11 +142,11 @@ export class AutoMemoryLogger {
     // Log fetch operations
     if (!this.originalFetch && typeof fetch !== 'undefined') {
       this.originalFetch = fetch;
-      (window as any).fetch = async (...args: Parameters<typeof fetch>) => {
+      (window as any).fetch = (async (...args: Parameters<typeof fetch>) => {
         return await memoryMonitor.logOperation(`Fetch - ${args[0]}`, async () => {
           return await this.originalFetch(...args);
         });
-      };
+      }) as typeof fetch;
     }
 
     // Log large timeouts (potential memory leaks)

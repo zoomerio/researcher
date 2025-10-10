@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import kgeuLogoUrl from '../../kgeu_logo_svg.png';
 
 interface RegisterProps {
   onRegisterSuccess: () => void;
@@ -102,6 +103,11 @@ export function Register({ onRegisterSuccess, onSwitchToLogin }: RegisterProps) 
   return (
     <div className="auth-container">
       <div className="auth-form">
+        <div className="auth-brand">
+          <div className="auth-logo-box">
+            <div className="auth-logo" style={{ backgroundImage: `url(${kgeuLogoUrl})` }} />
+          </div>
+        </div>
         <h2>Регистрация пользователя</h2>
         <form onSubmit={handleSubmit}>
           <div className="form-group">

@@ -30,7 +30,13 @@ export function UsersList({ user }: UsersListProps) {
   const loadUsers = async () => {
     try {
       setLoading(true);
-      const result = await window.api.getAllUsers();
+      const api = (window as any).api;
+      if (!api || !api.getAllUsers) {
+        console.warn('getAllUsers API недоступен');
+        setUsers([]);
+        return;
+      }
+      const result = await api.getAllUsers();
       
       if (result.success) {
         setUsers(result.users || []);

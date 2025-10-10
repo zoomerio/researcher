@@ -7,10 +7,11 @@
   "main": "electron/main.js",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"vite\" \"node scripts/start-electron-dev.mjs\"",
+    "dev": "npm run build:icons && concurrently -k -n VITE,ELECTRON -c cyan,magenta \"vite\" \"node scripts/start-electron-dev.mjs\"",
     "start": "electron .",
     "build:renderer": "vite build",
-    "build": "npm run build:renderer && electron-builder",
+    "build:icons": "node ./scripts/generate-icons.mjs",
+    "build": "npm run build:renderer && npm run build:icons && electron-builder",
     "clean": "rimraf dist",
     "lint": "echo No linter configured",
     "analyze:bundle": "npm run build:renderer && npx source-map-explorer 'dist/assets/*.js'",
@@ -32,6 +33,7 @@
     },
     "asar": true,
     "win": {
+      "icon": "build/icons/icon.ico",
       "target": [
         "nsis"
       ],
@@ -45,6 +47,7 @@
       ]
     },
     "mac": {
+      "icon": "build/icons/icon.icns",
       "target": [
         "dmg"
       ],
@@ -57,6 +60,7 @@
       ]
     },
     "linux": {
+      "icon": "build/icons",
       "target": [
         "AppImage"
       ],
@@ -116,7 +120,9 @@
     "cross-env": "^7.0.3",
     "electron": "^30.0.8",
     "electron-builder": "^24.13.3",
+    "icon-gen": "^5.0.0",
     "rimraf": "^6.0.1",
+    "sharp": "^0.34.4",
     "source-map-explorer": "^2.5.3",
     "typescript": "^5.5.4",
     "vite": "^5.4.1",

@@ -99,27 +99,7 @@ const MemoryMonitorDashboard: React.FC = () => {
   }
 
   if (!isVisible) {
-    return (
-      <div
-        style={{
-          position: 'fixed',
-          top: '10px',
-          right: '10px',
-          zIndex: 10000,
-          backgroundColor: '#333',
-          color: 'white',
-          padding: '5px 10px',
-          borderRadius: '4px',
-          fontSize: '12px',
-          cursor: 'pointer',
-          opacity: 0.7,
-        }}
-        onClick={() => setIsVisible(true)}
-        title="Click to open Memory Monitor Dashboard (Ctrl+Shift+M)"
-      >
-        🧠 Memory Monitor
-      </div>
-    );
+    return null; // Hide opener badge in dev; toggle with Ctrl+Shift+M only
   }
 
   return (

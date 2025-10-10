@@ -17,29 +17,55 @@ export async function exportPdfWithPageBreaks(targetWindow, htmlContent = null) 
   }
 
   try {
-    // Get the HTML content from the editor if not provided
-    let content = htmlContent;
-    if (!content) {
-      console.log('[PDF Export] Extracting content from editor...');
-      content = await targetWindow.webContents.executeJavaScript(`
+    // Prefer extracting rendered ProseMirror content and split by page-break nodes in DOM
+    let pages = null;
+    if (!htmlContent) {
+      console.log('[PDF Export] Extracting rendered ProseMirror pages from DOM...');
+      pages = await targetWindow.webContents.executeJavaScript(`
         (() => {
-          const editorElement = document.querySelector('.ProseMirror');
-          console.log('[PDF Export] Editor element found:', !!editorElement);
-          const innerHTML = editorElement ? editorElement.innerHTML : '';
-          console.log('[PDF Export] Content length:', innerHTML.length);
-          return innerHTML;
+          const root = document.querySelector('.view-mode .ProseMirror') 
+            || document.querySelector('.a4-canvas .ProseMirror') 
+            || document.querySelector('.ProseMirror');
+          if (!root) return [];
+          const isPageBreak = (el) => {
+            if (!el || el.nodeType !== 1) return false;
+            const attr = el.getAttribute('data-type');
+            const cls = el.getAttribute('class') || '';
+            return (attr === 'page-break') || /(^|\s)page-break(\s|$)/.test(cls);
+          };
+          const fragments = [];
+          let buffer = [];
+          const pushBuffer = () => {
+            const html = buffer.join('').trim();
+            if (html) fragments.push(html);
+            buffer = [];
+          };
+          Array.from(root.childNodes).forEach((node) => {
+            if (node.nodeType === 1 && isPageBreak(node)) {
+              pushBuffer();
+              return; // skip the page-break node itself
+            }
+            // Serialize safe HTML for Elements/Text
+            const tmp = document.createElement('div');
+            tmp.appendChild(node.cloneNode(true));
+            buffer.push(tmp.innerHTML);
+          });
+          pushBuffer();
+          return fragments;
         })()
       `);
+      if (Array.isArray(pages) && pages.length > 0) {
+        console.log('[PDF Export] Extracted pages from DOM:', pages.length);
+      }
     }
 
-    console.log('[PDF Export] Content extracted, length:', content ? content.length : 0);
-
-    if (!content) {
-      throw new Error('No content to export');
+    // Fallback: use provided htmlContent if given
+    if (!pages || pages.length === 0) {
+      const content = htmlContent || '';
+      if (!content) throw new Error('No content to export');
+      const hasPageBreaks = /<div[^>]*(data-type=\"page-break\"|class=\"[^\"]*page-break[^\"]*\")[^>]*>.*?<\/div>/gi.test(content);
+      pages = hasPageBreaks ? splitContentByPageBreaks(content) : [cleanPageContent(content)];
     }
-
-    // Check if content has page breaks
-    const hasPageBreaks = /<div[^>]*data-type="page-break"[^>]*>.*?<\/div>/gi.test(content);
     console.log('[PDF Export] Content has page breaks:', hasPageBreaks);
 
     // Show save dialog
@@ -57,37 +83,11 @@ export async function exportPdfWithPageBreaks(targetWindow, htmlContent = null) 
 
     console.log('[PDF Export] Save path selected:', filePath);
 
-    let pdfBuffer;
-    
-    if (hasPageBreaks) {
-      // Split content by page breaks
-      const pages = splitContentByPageBreaks(content);
-      console.log('[PDF Export] Content split into', pages.length, 'pages');
-      
-      if (pages.length === 0) {
-        throw new Error('No content found after processing');
-      }
-
-      // Generate PDF with proper page breaks
-      console.log('[PDF Export] Generating PDF with page breaks...');
-      pdfBuffer = await generatePdfFromPages(pages);
-    } else {
-      // Use simple PDF generation for content without page breaks
-      console.log('[PDF Export] Generating simple PDF (no page breaks)...');
-      pdfBuffer = await targetWindow.webContents.printToPDF({
-        landscape: false,
-        marginsType: 3, // Custom margins
-        margins: {
-          top: 0, // Zero margins - let A4 canvas padding handle spacing
-          bottom: 0,
-          left: 0,
-          right: 0
-        },
-        pageSize: 'A4',
-        printBackground: true,
-        scaleFactor: 100,
-      });
-    }
+    // Always render via offscreen PDF window to avoid app background bleed
+    // Remove any UI overlays/menus from captured content
+    pages = pages.map(html => stripUiOverlays(html));
+    console.log('[PDF Export] Pages prepared:', pages.length);
+    const pdfBuffer = await generatePdfFromPages(pages);
     
     console.log('[PDF Export] PDF generated, buffer size:', pdfBuffer.length);
     
@@ -164,6 +164,14 @@ function cleanPageContent(pageContent) {
   return cleaned;
 }
 
+// Strip known UI overlays (context menus/toolbars) if they leaked into captured HTML
+function stripUiOverlays(html) {
+  // Defensive: remove any element with class names used by our app menus/overlays
+  return html
+    .replace(/<div[^>]*class=\"[^\"]*(tab-context-menu|menu-panel|menu-dropdown)[^\"]*\"[\s\S]*?<\/div>/gi, '')
+    .replace(/<div[^>]*style=\"[^\"]*position:\s*fixed[^\"]*\"[\s\S]*?<\/div>/gi, '');
+}
+
 /**
  * Generate PDF from array of page contents
  * @param {string[]} pages - Array of HTML content for each page
@@ -177,6 +185,7 @@ async function generatePdfFromPages(pages) {
     width: 800,
     height: 1200,
     show: false,
+    backgroundColor: '#ffffff',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -241,10 +250,11 @@ async function generatePdfFromPages(pages) {
  * @returns {string} Complete HTML document
  */
 function createPdfHtml(pages) {
+  const replaceSystemUi = (html) => html.replace(/font-family\s*:\s*[^;]*system-ui[^;]*;/gi, "font-family: 'Gilroy', Arial, sans-serif;");
   const pageHtmls = pages.map((pageContent, index) => `
-    <div class="pdf-page" ${index > 0 ? 'style="page-break-before: always;"' : ''}>
-      ${pageContent}
-    </div>
+    <section class="pdf-page" ${index > 0 ? 'data-break-before="true"' : ''}>
+      ${replaceSystemUi(pageContent)}
+    </section>
   `).join('');
 
   return `
@@ -260,17 +270,36 @@ function createPdfHtml(pages) {
         }
         
         body {
-          font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+          font-family: 'Gilroy', Arial, sans-serif;
           line-height: 1.6;
           color: #000;
           background: #fff;
           margin: 0;
           padding: 0;
+          overflow: hidden; /* no scrollbars in print */
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
         }
         
         .pdf-page {
-          min-height: 100vh;
+          width: 210mm;
+          min-height: 297mm;
+          padding: 15mm 15mm; /* content margin inside page */
           box-sizing: border-box;
+          background: #fff;
+          break-after: page; /* modern */
+          page-break-after: always; /* legacy */
+        }
+
+        .pdf-page:last-child {
+          break-after: auto;
+          page-break-after: auto;
+        }
+
+        /* honor manual page break between sections */
+        .pdf-page[data-break-before="true"] {
+          break-before: page;
+          page-break-before: always;
         }
         
         /* Ensure proper text wrapping in PDF - match editor exactly */
@@ -284,7 +313,7 @@ function createPdfHtml(pages) {
         
         /* Ensure exact font rendering match */
         body, .view-mode, .ProseMirror {
-          font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif !important;
+          font-family: 'Gilroy', Arial, sans-serif !important;
           font-size: 16px !important;
           line-height: 1.6 !important;
           letter-spacing: normal !important;
@@ -361,8 +390,13 @@ function createPdfHtml(pages) {
         img {
           max-width: 100%;
           height: auto;
+          break-inside: avoid;
         }
         
+        table, pre, blockquote, .katex-display, h1, h2, h3, h4, h5, h6 {
+          break-inside: avoid;
+        }
+
         /* Hide page break indicators in PDF */
         .page-break,
         [data-type="page-break"] {

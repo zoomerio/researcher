@@ -41,15 +41,17 @@ export function RecentDocuments({ user, recentDocuments, onOpenDocument }: Recen
 
     try {
       setLoading(true);
-      const documentPromises = recentDocuments.map(async (filePath) => {
+      const documentPromises = recentDocuments
+        .filter((p) => typeof p === 'string' && p.trim().length > 0)
+        .map(async (filePath) => {
         try {
-          const result = await window.api.getDocumentByPath(filePath);
+          const result = await (window as any).api.getDocumentByPath(filePath as string);
           return result.success ? result.document : null;
         } catch (error) {
           console.error('Error loading recent document:', filePath, error);
           return null;
         }
-      });
+        });
 
       const results = await Promise.all(documentPromises);
       const validDocuments = results.filter(doc => doc !== null) as Document[];
@@ -132,7 +134,10 @@ export function RecentDocuments({ user, recentDocuments, onOpenDocument }: Recen
                         onError={(e) => {
                           console.error('Failed to load cover image:', doc.cover_image_path);
                           e.currentTarget.style.display = 'none';
-                          e.currentTarget.nextElementSibling!.style.display = 'flex';
+                          const nextEl = e.currentTarget.nextElementSibling as HTMLElement | null;
+                          if (nextEl) {
+                            nextEl.style.display = 'flex';
+                          }
                         }}
                       />
                     ) : null}

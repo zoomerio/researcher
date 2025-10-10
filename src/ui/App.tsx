@@ -76,6 +76,7 @@ import {
   RiRulerLine,
   RiSeparator,
 } from 'react-icons/ri';
+import kgeuLogoUrl from '../../kgeu_logo_svg.png';
 
 type DropdownItem = { key: string; label: string; icon?: ReactNode };
 
@@ -267,15 +268,32 @@ declare global {
         validateSession: (payload: { sessionToken: string }) => Promise<any>;
         logout: (payload: { sessionToken: string }) => Promise<any>;
         getUser: (payload: { userId: number }) => Promise<any>;
+        // Admin/User listing
+        getAllUsers?: () => Promise<any>;
         // Document management
         saveDocumentMetadata: (payload: { documentData: any; authorData: any; filePath: string; coverImagePath?: string }) => Promise<any>;
         getUserDocuments: (payload: { userId: number }) => Promise<any>;
         getAllDocuments: () => Promise<any>;
         getDocumentById: (payload: { documentId: number }) => Promise<any>;
         getDocumentByPath: (payload: { filePath: string }) => Promise<any>;
+        updateUserProfile?: (payload: { userId: number; fullName: string; groupId: string; currentPassword?: string; newPassword?: string }) => Promise<any>;
         deleteDocument: (payload: { documentId: number; userId: number }) => Promise<any>;
         searchDocuments: (payload: { query: string; userId?: number }) => Promise<any>;
         generateDocumentCover: (payload: { htmlContent: string; filePath: string; oldCoverPath?: string }) => Promise<any>;
+        // Dialogs
+        confirmCloseWithUnsaved: (payload: { documentTitle: string }) => Promise<'save' | 'discard' | 'cancel'>;
+        // Window controls
+        windowMinimize: () => Promise<any>;
+        windowMaximizeToggle: () => Promise<any>;
+        windowClose: () => Promise<any>;
+        onWindowMaximizeChanged: (cb: (maximized: boolean) => void) => void;
+    };
+    appActions?: {
+      newDocument: () => void;
+      openDocument: () => Promise<void>;
+      save: () => Promise<void>;
+      saveAs: () => Promise<void>;
+      exportPdf: () => Promise<void>;
     };
   }
 }
@@ -288,11 +306,12 @@ const ViewMode: React.FC<{
   content: string;
   analysisData: AnalysisData;
   tabData: any;
-}> = ({ meta, content, analysisData, tabData }) => {
+  currentUser?: any;
+}> = ({ meta, content, analysisData, tabData, currentUser }) => {
   
   const generateViewModeHtml = () => {
-    // Get author info from document file, not localStorage
-    const author = tabData?.author;
+    // Get author info from document file; fallback to current authenticated user for new/unsaved docs
+    const author = tabData?.author || currentUser;
     
     // Debug logging (remove in production)
     console.log('[ViewMode] Debug info:', {
@@ -622,23 +641,15 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
   };
 
   // Show save confirmation dialog
-  const showSaveConfirmation = (documentTitle: string): Promise<'save' | 'discard' | 'cancel'> => {
-    return new Promise((resolve) => {
-      const result = confirm(
-        `Документ "${documentTitle}" содержит несохранённые изменения.\n\n` +
-        `Нажмите "OK" чтобы сохранить изменения, или "Отмена" чтобы закрыть без сохранения.`
-      );
-      
-      if (result) {
-        resolve('save');
-      } else {
-        const discard = confirm(
-          `Вы уверены, что хотите закрыть документ без сохранения изменений?\n\n` +
-          `Все несохранённые изменения будут потеряны.`
-        );
-        resolve(discard ? 'discard' : 'cancel');
-      }
-    });
+  const showSaveConfirmation = async (documentTitle: string): Promise<'save' | 'discard' | 'cancel'> => {
+    // Single dialog with three options provided by main process
+    try {
+      const choice = await window.api.confirmCloseWithUnsaved({ documentTitle });
+      return choice as 'save' | 'discard' | 'cancel';
+    } catch (e) {
+      // Fallback: behave safely and cancel if IPC fails
+      return 'cancel';
+    }
   };
 
   // Save current document and return success status
@@ -730,6 +741,21 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
       activeTab,
       tabs,
       activeTabId
+    };
+    (window as any).appActions = {
+      newDocument: () => {
+        setActiveTabSafely('home');
+        openCreateTab();
+      },
+      openDocument: async () => {
+        try {
+          const r = await window.api.openDocument();
+          if (!r?.canceled && r?.data) openLoadedDoc(r.data, r.filePath);
+        } catch (e) { console.error(e); }
+      },
+      save: async () => { await saveRef.current?.(); },
+      saveAs: async () => { await saveAsRef.current?.(); },
+      exportPdf: async () => { await exportPdf(); },
     };
   }, [activeTab, tabs, activeTabId]);
 
@@ -1418,9 +1444,11 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
   }
 
   function normalizeFontFamilyName(value?: string): string {
-    if (!value) return 'system-ui';
-    const first = value.split(',')[0]?.trim() || value;
-    return first.replace(/^['"]+|['"]+$/g, '');
+    // Default to Gilroy when font is not explicitly set or is system-ui
+    if (!value) return 'Gilroy';
+    const first = (value.split(',')[0]?.trim() || value).replace(/^['"]+|['"]+$/g, '');
+    if (first.toLowerCase() === 'system-ui') return 'Gilroy';
+    return first;
   }
 
 
@@ -1521,6 +1549,8 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
       return nextTabs;
     });
     setActiveTabSafely(id);
+    // Initialize original content for unsaved-change detection on new documents
+    setOriginalContentForTab(id, '<p></p>');
   }
 
   async function closeTab(id: string) {
@@ -2045,7 +2075,7 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
             console.log('[SaveRef] Getting existing document info for cover replacement...');
             let oldCoverPath = null;
             try {
-              const existingDoc = await window.api.getDocumentByPath({ filePath: currentTab.filePath });
+              const existingDoc = await (window as any).api.getDocumentByPath(currentTab.filePath || '');
               if (existingDoc.success && existingDoc.document) {
                 oldCoverPath = existingDoc.document.cover_image_path;
                 console.log('[SaveRef] Found existing cover to replace:', oldCoverPath);
@@ -2408,7 +2438,7 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
           >
             <span className="title">{t.type === 'home' ? <RiMenuLine /> : t.title}</span>
               {t.closable && (
-                <button className="close" aria-label="Close tab" title="Close" onClick={async (e) => { e.stopPropagation(); await closeTab(t.id); }}>
+                <button className="close" aria-label="Закрыть вкладку" title="Закрыть" onClick={async (e) => { e.stopPropagation(); await closeTab(t.id); }}>
                   ✕
                 </button>
               )}
@@ -2514,6 +2544,14 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
               <span className="nav-icon">👥</span>
               <span className="nav-text">Пользователи</span>
             </button>
+          </div>
+          <div className="sidebar-footer">
+            <div className="org-brand">
+              <div className="org-logo-box">
+                <div className="org-logo" style={{ backgroundImage: `url(${kgeuLogoUrl})` }} />
+              </div>
+              <div className="org-name">ООО «КГЭУ-ИСУ»</div>
+            </div>
           </div>
         </div>
       )}
@@ -2748,6 +2786,7 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
               content={activeTab?.data?.contentHtml || activeTab?.data?.content || ''}
               analysisData={tempAnalysisData.get(activeTab.id) || activeTab?.data?.meta?.analysis || {conclusions: '', goals: [], hypotheses: [], plan: []}}
               tabData={activeTab?.data}
+              currentUser={user}
             />
           )}
 
@@ -2770,9 +2809,9 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
                     {/* Font family dropdown */}
                     <Dropdown
                       label={(() => {
-                        const fam = normalizeFontFamilyName(editor?.getAttributes('textStyle').fontFamily as string);
+                        const fam = normalizeFontFamilyName(editor?.getAttributes('textStyle').fontFamily as string) || 'Gilroy';
                         const labelMap: Record<string, string> = {
-                          'system-ui': 'Системный',
+                          'Gilroy': 'Gilroy',
                           'Arial': 'Arial',
                           'Georgia': 'Georgia',
                           'Times New Roman': 'Times New Roman',
@@ -2783,14 +2822,14 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
                       })()}
                       icon={null}
                       items={[
-                        { key: 'system-ui', label: 'Системный' },
-                        { key: 'Arial', label: 'Arial' },
-                        { key: 'Georgia', label: 'Georgia' },
-                        { key: 'Times New Roman', label: 'Times New Roman' },
-                        { key: 'Courier New', label: 'Courier New' },
-                        { key: 'Verdana', label: 'Verdana' },
+                        { key: 'Gilroy', label: '', icon: (<span style={{ fontFamily: 'Gilroy' }}>Gilroy</span>) },
+                        { key: 'Arial', label: '', icon: (<span style={{ fontFamily: 'Arial' }}>Arial</span>) },
+                        { key: 'Georgia', label: '', icon: (<span style={{ fontFamily: 'Georgia' }}>Georgia</span>) },
+                        { key: 'Times New Roman', label: '', icon: (<span style={{ fontFamily: 'Times New Roman' }}>Times New Roman</span>) },
+                        { key: 'Courier New', label: '', icon: (<span style={{ fontFamily: 'Courier New' }}>Courier New</span>) },
+                        { key: 'Verdana', label: '', icon: (<span style={{ fontFamily: 'Verdana' }}>Verdana</span>) },
                       ]}
-                      selectedKey={normalizeFontFamilyName(editor?.getAttributes('textStyle').fontFamily as string) || 'system-ui'}
+                      selectedKey={normalizeFontFamilyName(editor?.getAttributes('textStyle').fontFamily as string) || 'Gilroy'}
                       onSelect={(k) => editor?.chain().focus().setFontFamily(k as string).run()}
                       fixedWidthPx={150}
                     />
@@ -2925,8 +2964,6 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
                     />
                     {/* Code block */}
                     <button className={`tool ${editor?.isActive('codeBlock') ? 'active' : ''}`} title="Блок кода" onClick={() => editor?.chain().focus().toggleCodeBlock().run()}><RiCodeBoxLine /></button>
-                    {/* Image (kept here) */}
-                    <button className="tool" title="Вставить изображение" onClick={async () => { const r = await window.api.pickImage(); if (!r?.canceled && (r as any).dataUrl) editor?.chain().focus().setImage({ src: (r as any).dataUrl }).run(); }}><RiImageLine /></button>
                     {/* Page Break */}
                     <button className="tool" title="Разрыв страницы (Ctrl+Enter)" onClick={() => editor?.chain().focus().setPageBreak().run()}><RiSeparator /></button>
                   </div>
@@ -3101,11 +3138,11 @@ const AppContent: React.FC<{ user: any; sessionToken: string; logout: () => void
                 </div>
                 )}
                 <div className="tool-tabs">
-                  <button className={`tool-tab ${activeTool === 'text' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'text' ? null : 'text')}>Text</button>
-                  <button className={`tool-tab ${activeTool === 'tables' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'tables' ? null : 'tables')}>Tables</button>
-                  <button className={`tool-tab ${activeTool === 'formulas' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'formulas' ? null : 'formulas')}>Formulas</button>
-                  <button className={`tool-tab ${activeTool === 'graphs' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'graphs' ? null : 'graphs')}>Graphs</button>
-                  <button className={`tool-tab ${activeTool === 'images' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'images' ? null : 'images')}>Images</button>
+                  <button className={`tool-tab ${activeTool === 'text' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'text' ? null : 'text')}>Текст</button>
+                  <button className={`tool-tab ${activeTool === 'tables' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'tables' ? null : 'tables')}>Таблицы</button>
+                  <button className={`tool-tab ${activeTool === 'formulas' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'formulas' ? null : 'formulas')}>Формулы</button>
+                  <button className={`tool-tab ${activeTool === 'graphs' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'graphs' ? null : 'graphs')}>Графики</button>
+                  <button className={`tool-tab ${activeTool === 'images' ? 'active' : ''}`} onClick={() => setActiveTool(prev => prev === 'images' ? null : 'images')}>Изображения</button>
                 </div>
               </div>
               <DragHandleReact editor={editor}>
@@ -4060,7 +4097,7 @@ const GraphsBar: React.FC<{ editor: any; selectedGraph: any; setSelectedGraph: (
           disabled={!selectedGraph}
           title={selectedGraph ? "Редактировать выбранный график" : "Выберите график для редактирования"}
         >
-          <RiEditLine />
+          <RiEditLine /> Редактировать
         </button>
         <button 
           className={`tool ${selectedGraph ? '' : 'disabled'}`}
@@ -4068,7 +4105,7 @@ const GraphsBar: React.FC<{ editor: any; selectedGraph: any; setSelectedGraph: (
           disabled={!selectedGraph}
           title={selectedGraph ? "Удалить выбранный график" : "Выберите график для удаления"}
         >
-          <RiDeleteBinLine />
+          <RiDeleteBinLine /> Удалить
         </button>
         <button 
           className={`tool ${selectedGraph ? '' : 'disabled'}`}
@@ -4076,7 +4113,7 @@ const GraphsBar: React.FC<{ editor: any; selectedGraph: any; setSelectedGraph: (
           disabled={!selectedGraph}
           title={selectedGraph ? "Экспортировать выбранный график в PNG" : "Выберите график для экспорта"}
         >
-          <RiImageLine />
+          <RiImageLine /> Экспорт
         </button>
       </div>
     </>
@@ -4085,12 +4122,131 @@ const GraphsBar: React.FC<{ editor: any; selectedGraph: any; setSelectedGraph: (
 
 // Main App component with authentication wrapper
 export const App: React.FC = () => {
+  // Helper to close both dropdowns
+  const closeMenus = () => {
+    document.getElementById('menu-file')?.classList.remove('open');
+    document.getElementById('menu-edit')?.classList.remove('open');
+  };
+  // Close menus on any click outside
+  useEffect(() => {
+    const handler = () => closeMenus();
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, []);
+  // Also close on pointerdown (covers draggable topbar where click may not fire)
+  // (disabled to avoid interfering with native double-click on drag region)
+
+  // Listen maximize changes to toggle rounded corners
+  useEffect(() => {
+    const root = document.getElementById('app-root');
+    const cb = (maximized: boolean) => {
+      if (!root) return;
+      if (maximized) root.classList.add('maximized');
+      else root.classList.remove('maximized');
+    };
+    // initial state may arrive after ready-to-show
+    (window as any).api.onWindowMaximizeChanged(cb);
+    return () => { /* listener removed in preload via removeAllListeners before set */ };
+  }, []);
+  // Close menus when app loses focus (click за пределами окна)
+  useEffect(() => {
+    const onBlur = () => closeMenus();
+    window.addEventListener('blur', onBlur);
+    return () => window.removeEventListener('blur', onBlur);
+  }, []);
   return (
-    <AuthWrapper>
-      {(user, sessionToken, logout) => (
-        <AppContent user={user} sessionToken={sessionToken} logout={logout} />
-      )}
-    </AuthWrapper>
+    <div className="app-root" id="app-root">
+      <div className="topbar" data-tauri-drag-region onMouseDown={() => closeMenus()} onDoubleClick={() => window.api.windowMaximizeToggle()}>
+        <div className="menu-area">
+          <div className="app-menu">
+            <div className="menu-dropdown" id="menu-file">
+              <button className="menu-item" onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const el = document.getElementById('menu-file');
+                const isOpen = el?.classList.contains('open');
+                document.getElementById('menu-file')?.classList.remove('open');
+                document.getElementById('menu-edit')?.classList.remove('open');
+                if (!isOpen) el?.classList.add('open');
+              }}>Файл</button>
+              <div className="menu-panel" onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+                <button className="menu-command" onClick={() => { (window as any).appActions?.newDocument(); closeMenus(); }}>
+                  <span>Новый документ</span>
+                  <span className="shortcut">Ctrl+N</span>
+                </button>
+                <button className="menu-command" onClick={() => { (window as any).appActions?.openDocument(); closeMenus(); }}>
+                  <span>Открыть…</span>
+                  <span className="shortcut">Ctrl+O</span>
+                </button>
+                <button className="menu-command" onClick={() => { (window as any).appActions?.save(); closeMenus(); }}>
+                  <span>Сохранить</span>
+                  <span className="shortcut">Ctrl+S</span>
+                </button>
+                <button className="menu-command" onClick={() => { (window as any).appActions?.saveAs(); closeMenus(); }}>
+                  <span>Сохранить как…</span>
+                  <span className="shortcut">Ctrl+Shift+S</span>
+                </button>
+                <div className="menu-sep" />
+                <button className="menu-command" onClick={() => { (window as any).appActions?.exportPdf(); closeMenus(); }}>
+                  <span>Экспорт в PDF</span>
+                </button>
+              </div>
+            </div>
+            <div className="menu-dropdown" id="menu-edit">
+              <button className="menu-item" onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const el = document.getElementById('menu-edit');
+                const isOpen = el?.classList.contains('open');
+                document.getElementById('menu-file')?.classList.remove('open');
+                document.getElementById('menu-edit')?.classList.remove('open');
+                if (!isOpen) el?.classList.add('open');
+              }}>Правка</button>
+              <div className="menu-panel" onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+                <button className="menu-command" onClick={() => { document.execCommand('undo'); closeMenus(); }}>
+                  <span>Отменить</span>
+                  <span className="shortcut">Ctrl+Z</span>
+                </button>
+                <button className="menu-command" onClick={() => { document.execCommand('redo'); closeMenus(); }}>
+                  <span>Повторить</span>
+                  <span className="shortcut">Ctrl+Y</span>
+                </button>
+                <div className="menu-sep" />
+                <button className="menu-command" onClick={() => { document.execCommand('cut'); closeMenus(); }}>
+                  <span>Вырезать</span>
+                  <span className="shortcut">Ctrl+X</span>
+                </button>
+                <button className="menu-command" onClick={() => { document.execCommand('copy'); closeMenus(); }}>
+                  <span>Копировать</span>
+                  <span className="shortcut">Ctrl+C</span>
+                </button>
+                <button className="menu-command" onClick={() => { document.execCommand('paste'); closeMenus(); }}>
+                  <span>Вставить</span>
+                  <span className="shortcut">Ctrl+V</span>
+                </button>
+                <div className="menu-sep" />
+                <button className="menu-command" onClick={() => { document.execCommand('selectAll'); closeMenus(); }}>
+                  <span>Выделить всё</span>
+                  <span className="shortcut">Ctrl+A</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="window-controls" onDoubleClick={() => window.api.windowMaximizeToggle()}>
+          <button className="win-btn minimize" onClick={(e) => { e.stopPropagation(); window.api.windowMinimize(); }} title="Свернуть">—</button>
+          <button className="win-btn maximize" onClick={(e) => { e.stopPropagation(); window.api.windowMaximizeToggle(); }} title="Развернуть">▢</button>
+          <button className="win-btn close" onClick={(e) => { e.stopPropagation(); window.api.windowClose(); }} title="Закрыть">✕</button>
+        </div>
+      </div>
+      <div className="app-content">
+        <AuthWrapper>
+          {(user, sessionToken, logout) => (
+            <AppContent user={user} sessionToken={sessionToken} logout={logout} />
+          )}
+        </AuthWrapper>
+      </div>
+    </div>
   );
 };
 

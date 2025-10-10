@@ -159,18 +159,15 @@ class MemoryMonitor {
   /**
    * Log memory usage for a specific operation
    */
-  async logOperation(operationName: string, operation: () => void | Promise<void>): Promise<void> {
+  async logOperation<T>(operationName: string, operation: () => T | Promise<T>): Promise<T> {
     const memoryBefore = await this.getCurrentMemoryInfo();
     console.log(`🚀 Starting operation: ${operationName}`);
     
-    if (operation.constructor.name === 'AsyncFunction') {
-      await (operation as () => Promise<void>)();
-    } else {
-      (operation as () => void)();
-    }
+    const result = await operation();
     
     const memoryAfter = await this.getCurrentMemoryInfo();
     this.logOperationResult(operationName, memoryBefore, memoryAfter);
+    return result;
   }
 
   /**
@@ -305,7 +302,7 @@ class MemoryMonitor {
     if (topOperations.length > 0) {
       report += `🔝 Top Memory-Consuming Operations:\n`;
       report += `${'-'.repeat(40)}\n`;
-      topOperations.forEach((op, index) => {
+      topOperations.forEach((op: { operation: string; memoryIncrease: number; timestamp: number; memoryBefore: number; memoryAfter: number; }, index: number) => {
         const increase = op.memoryIncrease >= 0 ? `+${this.formatMemorySize(op.memoryIncrease)}` : this.formatMemorySize(op.memoryIncrease);
         report += `${index + 1}. ${op.operation}: ${increase}\n`;
         report += `   Time: ${new Date(op.timestamp).toLocaleTimeString()}\n`;

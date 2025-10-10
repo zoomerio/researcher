@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, protocol, Menu } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -44,23 +45,42 @@ function generateImageHash(imageBuffer) {
 function createWindow() {
   const config = memoryConfig.getCompleteConfig();
   
+  const __icon = (() => {
+    // Prefer ICO on Windows for taskbar in dev; fallback to PNG
+    const ico = path.resolve(__dirname, '..', 'build', 'icons', 'icon.ico');
+    const png512 = path.resolve(__dirname, '..', 'build', 'icons', '512x512.png');
+    if (fsSync.existsSync(ico)) return ico;
+    if (fsSync.existsSync(png512)) return png512;
+    return undefined;
+  })();
+  
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 900,
+    minWidth: 1024,
+    minHeight: 700,
+    icon: __icon,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       webSecurity: config.webPreferences.main.webSecurity, // Use config value
       ...config.webPreferences.main
     },
     show: false,
+    frame: false,
+    titleBarStyle: 'hidden',
+    trafficLightPosition: { x: 12, y: 12 },
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: true,
     // Additional memory optimizations
-    useContentSize: true, // Use content size instead of window size
     enableLargerThanScreen: false, // Prevent oversized windows
     ...config.window.main
   });
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
+    // Notify renderer about initial maximize state
+    mainWindow?.webContents.send('window:maximize-changed', mainWindow.isMaximized());
     if (openOnReadyFilePath) {
       mainWindow?.webContents.send('file:open-path', openOnReadyFilePath);
       openOnReadyFilePath = null;
@@ -103,6 +123,14 @@ function createWindow() {
       console.warn('[Electron] Error recording activity:', error.message);
     }
   });
+
+  // Propagate maximize state changes to renderer for styling
+  mainWindow.on('maximize', () => {
+    try { mainWindow?.webContents.send('window:maximize-changed', true); } catch {}
+  });
+  mainWindow.on('unmaximize', () => {
+    try { mainWindow?.webContents.send('window:maximize-changed', false); } catch {}
+  });
   
   // Track user activity for priority management
   mainWindow.webContents.on('did-finish-load', () => {
@@ -143,10 +171,10 @@ function buildMenu() {
       ]
     }] : []),
     {
-      label: 'File',
+      label: 'Файл',
       submenu: [
-        { label: 'New Document', accelerator: 'CmdOrCtrl+N', click: () => (lastFocusedWindow || mainWindow)?.webContents.send('menu:new') },
-        { label: 'Open…', accelerator: 'CmdOrCtrl+O', click: async () => {
+        { label: 'Новый документ', accelerator: 'CmdOrCtrl+N', click: () => (lastFocusedWindow || mainWindow)?.webContents.send('menu:new') },
+        { label: 'Открыть…', accelerator: 'CmdOrCtrl+O', click: async () => {
             const { canceled, filePaths } = await dialog.showOpenDialog({
               title: 'Открыть документ',
               properties: ['openFile'],
@@ -199,16 +227,16 @@ function buildMenu() {
             }
         }},
         { type: 'separator' },
-        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => {
+        { label: 'Сохранить', accelerator: 'CmdOrCtrl+S', click: () => {
             const targetWin = lastFocusedWindow || mainWindow;
             targetWin?.webContents.send('menu:save');
         }},
-        { label: 'Save As…', accelerator: 'CmdOrCtrl+Shift+S', click: () => {
+        { label: 'Сохранить как…', accelerator: 'CmdOrCtrl+Shift+S', click: () => {
             const targetWin = lastFocusedWindow || mainWindow;
             targetWin?.webContents.send('menu:saveAs');
         }},
         { type: 'separator' },
-        { label: 'Export PDF', click: async () => {
+        { label: 'Экспорт в PDF', click: async () => {
             console.log('[Menu] PDF export clicked');
             const targetWin = lastFocusedWindow || mainWindow;
             console.log('[Menu] Target window:', !!targetWin);
@@ -228,8 +256,8 @@ function buildMenu() {
             if (!canExport) {
               dialog.showMessageBox(targetWin, {
                 type: 'info',
-                title: 'PDF Export',
-                message: 'PDF export is only available in document editing or view mode.',
+                title: 'Экспорт PDF',
+                message: 'Экспорт PDF доступен только в режиме редактирования или просмотра документа.',
                 buttons: ['OK']
               });
               return;
@@ -243,25 +271,57 @@ function buildMenu() {
       ]
     },
     {
-      label: 'Edit',
+      label: 'Правка',
       submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
+        { role: 'undo', label: 'Отменить' },
+        { role: 'redo', label: 'Повторить' },
         { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'delete' },
-        { role: 'selectAll' },
+        { role: 'cut', label: 'Вырезать' },
+        { role: 'copy', label: 'Копировать' },
+        { role: 'paste', label: 'Вставить' },
+        { role: 'delete', label: 'Удалить' },
+        { role: 'selectAll', label: 'Выделить всё' },
       ]
     },
-    { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
-    { role: 'windowMenu' },
-    { role: 'help', submenu: [{ label: 'Learn More', click: () => shell.openExternal('https://www.electronjs.org') }] },
   ];
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
 }
+// Window control IPC
+ipcMain.handle('window:controls', async (event, action) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (!win) return { ok: false };
+  switch (action) {
+    case 'minimize':
+      win.minimize();
+      return { ok: true };
+    case 'maximize':
+      if (win.isMaximized()) win.unmaximize(); else win.maximize();
+      return { ok: true, maximized: win.isMaximized() };
+    case 'close':
+      win.close();
+      return { ok: true };
+    default:
+      return { ok: false };
+  }
+});
+// Unified confirm dialog with three options: save, dontsave, cancel
+ipcMain.handle('dialog:confirm-close-with-unsaved', async (_event, { documentTitle }) => {
+  const result = await dialog.showMessageBox({
+    type: 'warning',
+    title: 'Несохранённые изменения',
+    message: `Документ "${documentTitle}" содержит несохранённые изменения.`,
+    detail: 'Вы хотите сохранить изменения перед закрытием?',
+    buttons: ['Сохранить', 'Не сохранять', 'Отмена'],
+    cancelId: 2,
+    defaultId: 0,
+    noLink: true
+  });
+  // Map button index to string
+  if (result.response === 0) return 'save';
+  if (result.response === 1) return 'discard';
+  return 'cancel';
+});
 
 // Single instance lock to handle opening files on Windows
 const gotLock = app.requestSingleInstanceLock();
@@ -325,6 +385,8 @@ function openChildWindow(initialPayload) {
   const win = new BrowserWindow({
     width: 1000,
     height: 800,
+    minWidth: 800,
+    minHeight: 600,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       webSecurity: false, // Allow custom protocols

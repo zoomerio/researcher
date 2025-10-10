@@ -58,10 +58,10 @@ export function withRenderCounter<P extends object>(
     return WrappedComponent;
   }
 
-  const TrackedComponent = React.forwardRef<any, P>((props, ref) => {
+  const TrackedComponent: React.FC<P> = (props) => {
     useRenderCounter(componentName || WrappedComponent.name || 'Component', props);
-    return React.createElement(WrappedComponent, { ...props, ref });
-  });
+    return React.createElement(WrappedComponent, props as P);
+  };
 
   TrackedComponent.displayName = `withRenderCounter(${componentName || WrappedComponent.name || 'Component'})`;
   

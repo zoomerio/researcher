@@ -6,17 +6,16 @@
   --accent: #22d3ee;
 }
 
-html, body, #root {
-  height: 100%;
-}
+html, body, #root { height: 100%; background: transparent; }
 
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
-  color: var(--text);
-  background: var(--bg);
-  overflow: hidden; /* prevent page-level scrollbars; we manage scroll in panes */
-}
+@font-face { font-family: 'Gilroy'; src: url('/fonts/gilroy-regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Light.otf') format('opentype'); font-weight: 300; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Gilroy'; src: url('/fonts/gilroy-bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-ExtraBold.otf') format('opentype'); font-weight: 800; font-style: normal; font-display: swap; }
+
+body { margin: 0; font-family: 'Gilroy', Arial, sans-serif; color: var(--text); background: transparent; overflow: hidden; }
+/* Ensure form controls and interactive elements inherit the app font */
+button, input, select, textarea { font-family: inherit; }
 
 /* Remove default focus outlines for app controls and editor */
 input:focus, textarea:focus, select:focus, button:focus { outline: none !important; box-shadow: none !important; }
@@ -140,7 +139,40 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   }
 }
 
-.app-shell { display: grid; height: 100vh; grid-template-rows: 44px 1fr; }
+.app-shell { display: grid; height: 100%; grid-template-rows: 44px 1fr; }
+.app-root { display: grid; grid-template-rows: 36px 1fr; height: 100vh; }
+.app-content { min-height: 0; }
+/* Rounded corners only when not maximized */
+/* On Windows we rely on native resize/double-click behavior; keep background and border radii but allow native frame emulation */
+#app-root { border-radius: 12px; overflow: hidden; background: var(--bg); border: 1px solid #1f2937; }
+#app-root.maximized { border-radius: 0; border: none; }
+.topbar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  background: var(--panel);
+  color: var(--text);
+  border-bottom: 1px solid #1f2937;
+  padding: 0 8px;
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: 2000;
+}
+.menu-area { display: flex; gap: 8px; }
+.app-menu { display: flex; gap: 8px; }
+.menu-item { background: transparent; color: var(--text); border: none; padding: 6px 10px; border-radius: 6px; -webkit-app-region: no-drag; cursor: pointer; }
+.menu-dropdown { position: relative; -webkit-app-region: no-drag; }
+.menu-dropdown .menu-panel { position: absolute; top: 100%; left: 0; background: #0b1220; border: 1px solid #1f2937; border-radius: 8px; padding: 6px; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 1000; min-width: 280px; }
+.menu-dropdown.open .menu-panel { display: grid; gap: 6px; }
+.menu-command { background: #0b1220; color: var(--text); border: none; border-radius: 6px; padding: 8px 12px; text-align: left; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 16px; white-space: nowrap; }
+.menu-command .shortcut { color: var(--muted); font-size: 12px; }
+.menu-command:hover { background: #111a2c; }
+.menu-sep { height: 1px; background: #334155; margin: 4px 0; }
+.menu-item:hover { background: #111a2c; }
+.window-controls { display: flex; gap: 6px; -webkit-app-region: no-drag; }
+.win-btn { width: 36px; height: 28px; background: transparent; color: var(--text); border: none; border-radius: 4px; cursor: pointer; }
+.win-btn:hover { background: #111a2c; }
+.win-btn.close:hover { background: #b91c1c; color: white; }
 .app-shell.with-sidebar { grid-template-columns: 220px 1fr; grid-template-areas: "tabs tabs" "sidebar content"; }
 .app-shell.no-sidebar { grid-template-columns: 1fr; grid-template-areas: "tabs" "content"; }
 
@@ -159,6 +191,27 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   padding: 16px;
   border-bottom: 1px solid #1f2937;
 }
+
+.org-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: center;
+}
+
+.org-logo-box { width: 100%; max-width: 150px; aspect-ratio: 1 / 1; display: grid; place-items: center; }
+
+.org-logo {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+.org-name { font-size: 14px; font-weight: 600; color: var(--text); text-align: center; margin-top: 10px; display: block; line-height: 1.2; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 14px; }
 
 .user-profile {
   display: flex;
@@ -206,6 +259,8 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   flex-direction: column;
   gap: 8px;
 }
+
+.sidebar-footer { margin-top: auto; padding: 16px 16px 28px; border-top: none; display: flex; align-items: center; justify-content: center; -webkit-app-region: no-drag; }
 
 .nav-btn {
   display: flex;
@@ -338,7 +393,7 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   padding: 0 12px 0 18px; /* move a bit to the right */
   background: transparent;
   position: relative; /* stacking context anchor */
-  z-index: 1; /* keep under toolbar and dropdown menus */
+  z-index: 10; /* below topbar but above content */
   margin-bottom: -1px; /* overlap tools-panel top border by 1px */
 }
 
@@ -394,7 +449,7 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   border-radius: 0 0 8px 8px;
   min-height: 64px; /* constant height */
   position: relative;
-  z-index: 20; /* above tabs container */
+  z-index: 20; /* below topbar (2000), above tool-tabs */
   overflow: visible; /* allow dropdown menus to escape */
   /* subtle inner shadow to de-emphasize the seam; avoids 1px artifacts */
   box-shadow: inset 0 1px 0 0 #0b1220;
@@ -1982,7 +2037,7 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 100vh;
+  min-height: 100%;
   background: var(--bg);
   padding: 20px;
 }
@@ -1995,6 +2050,29 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   width: 100%;
   max-width: 400px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.auth-brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.auth-logo-box {
+  width: 180px;
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+}
+
+/* removed auth-brand-name (brand text only in sidebar) */
+
+.auth-logo {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
 }
 
 .auth-form h2 {
@@ -2471,6 +2549,7 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   color: var(--text);
   line-height: 1.2;
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
@@ -2513,6 +2592,7 @@ input:focus, textarea:focus, select:focus, button:focus { outline: none !importa
   opacity: 0.8;
   flex: 1;
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;

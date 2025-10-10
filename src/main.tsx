@@ -10,11 +10,9 @@ import './utils/simpleRenderTracker';
 
 // Import development components
 let MemoryMonitorDashboard: React.ComponentType | null = null;
-let PerformanceMonitor: React.ComponentType<any> | null = null;
 
 if (process.env.NODE_ENV === 'development') {
   MemoryMonitorDashboard = React.lazy(() => import('./components/MemoryMonitorDashboard'));
-  PerformanceMonitor = React.lazy(() => import('./components/PerformanceMonitor').then(m => ({ default: m.PerformanceMonitor })));
 }
 
 // Simple approach - rely on TipTap Mathematics extension only
@@ -29,11 +27,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     {MemoryMonitorDashboard && (
       <React.Suspense fallback={null}>
         <MemoryMonitorDashboard />
-      </React.Suspense>
-    )}
-    {PerformanceMonitor && (
-      <React.Suspense fallback={null}>
-        <PerformanceMonitor isVisible={true} position="bottom-left" />
       </React.Suspense>
     )}
   </React.StrictMode>

@@ -28,7 +28,7 @@ export function DocumentLibrary({ user, onOpenDocument }: DocumentLibraryProps) 
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'my' | 'all'>('my');
-  const [sortBy, setSortBy] = useState<'title' | 'created'>('created');
+  const [sortBy, setSortBy] = useState<'title' | 'created' | 'modified'>('created');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(20);
@@ -258,7 +258,7 @@ export function DocumentLibrary({ user, onOpenDocument }: DocumentLibraryProps) 
             
             <div className="sort-controls">
               <label>Сортировка:</label>
-              <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)}>
+              <select value={sortBy} onChange={(e) => setSortBy((e.target.value as 'title' | 'created' | 'modified'))}>
                 <option value="created">По дате создания</option>
                 <option value="modified">По дате изменения</option>
                 <option value="title">По алфавиту</option>
@@ -308,7 +308,10 @@ export function DocumentLibrary({ user, onOpenDocument }: DocumentLibraryProps) 
                           onError={(e) => {
                             console.error('Failed to load cover image:', doc.cover_image_path);
                             e.currentTarget.style.display = 'none';
-                            e.currentTarget.nextElementSibling.style.display = 'flex';
+                            const nextEl = e.currentTarget.nextElementSibling as HTMLElement | null;
+                            if (nextEl && (nextEl as HTMLElement).style) {
+                              (nextEl as HTMLElement).style.display = 'flex';
+                            }
                           }}
                         />
                       ) : null}
